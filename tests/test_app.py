@@ -199,6 +199,10 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertNotIn("CRÉDITOS DISPONIBLES", settings.text)
         self.assertNotIn("Comprobar en MWAPI", settings.text)
         self.assertIn("irm https://claude.ai/install.ps1 | iex", settings.text)
+        self.assertIn('$claudeDir = "$env:USERPROFILE\\.local\\bin"', settings.text)
+        self.assertIn("claude --version", settings.text)
+        self.assertIn("winget install Anthropic.ClaudeCode", settings.text)
+        self.assertIn("claude no se reconoce", settings.text)
         self.assertIn("wire_api = \"responses\"", settings.text)
         self.assertIn("requires_openai_auth = false", settings.text)
 

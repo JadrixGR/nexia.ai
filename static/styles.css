@@ -1165,6 +1165,10 @@ html[data-theme="dark"] .chat-message.user .message-avatar { background: #3a3732
 .integration-card p { margin: 3px 0 12px; color: var(--muted); font-size: 10px; }
 .integration-card pre { max-width: 100%; overflow-x: auto; margin: 12px 0; padding: 14px; color: #ece6dc; background: #292724; border-radius: 10px; font-size: 9px; line-height: 1.65; }
 .integration-card small { color: var(--muted); font-size: 8px; }
+.integration-warning { display: grid; gap: 2px; margin: 15px 0 3px; padding: 10px 12px; color: #7d4b20; background: #fff1d8; border: 1px solid #efd4a4; border-radius: 9px; }
+.integration-warning b { font-size: 9px; }
+.integration-warning span { font-size: 8px; line-height: 1.5; }
+html[data-theme="dark"] .integration-warning { color: #f2c486; background: #3b3020; border-color: #5c482a; }
 .setup-steps { margin: 17px 0 9px; padding-left: 20px; }
 .setup-steps li { margin: 0 0 11px; padding-left: 3px; color: var(--ink); font-size: 10px; }
 .setup-steps b, .setup-steps span { display: block; }
@@ -1176,6 +1180,7 @@ html[data-theme="dark"] .chat-message.user .message-avatar { background: #3a3732
 .persistent-config { margin: 8px 0 16px; padding: 11px 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }
 .persistent-config summary { color: var(--ink); cursor: pointer; font-size: 9px; font-weight: 700; }
 .persistent-config p { margin: 9px 0 5px; }
+.install-help { margin-top: -5px; }
 .client-form { grid-template-columns: 1.35fr .6fr .65fr 1fr auto; }
 
 @media (max-width: 960px) {

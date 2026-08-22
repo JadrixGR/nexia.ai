@@ -83,7 +83,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.3.0")
+app = FastAPI(title="Nexia", version="3.3.1")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -1388,5 +1388,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.3.0"),
+        "version": os.environ.get("APP_VERSION", "3.3.1"),
     }

@@ -111,10 +111,17 @@ El token completo se muestra una sola vez.
 Para Claude Code en PowerShell:
 
 ```powershell
+irm https://claude.ai/install.ps1 | iex
+$claudeDir = "$env:USERPROFILE\.local\bin"
+$env:Path = "$env:Path;$claudeDir"
 $env:ANTHROPIC_BASE_URL="https://tu-dominio.com/api/anthropic"
 $env:ANTHROPIC_AUTH_TOKEN="nxa_TU_TOKEN"
 claude --model claude-sonnet-4-6
 ```
+
+Si PowerShell indica que `claude` no se reconoce, comprueba
+`Test-Path "$env:USERPROFILE\.local\bin\claude.exe"`, añade esa carpeta al `PATH`
+del usuario o instala la alternativa oficial con `winget install Anthropic.ClaudeCode`.
 
 Para Codex, define `NEXIA_API_KEY=nxa_TU_TOKEN` y registra Nexia en
 `%USERPROFILE%\.codex\config.toml`:

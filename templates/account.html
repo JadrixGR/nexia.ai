@@ -93,16 +93,26 @@
           {% if status.client_token_prefix %}<form method="post" action="/configuracion/token/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="btn btn-quiet" type="submit">Revocar</button></form>{% endif %}
         </div>
       </div>
-      {% if new_client_token %}<div class="new-token-box"><p>GUÁRDALO AHORA — NO VOLVERÁ A MOSTRARSE</p><div><code id="new-token">{{ new_client_token }}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('new-token').textContent);this.textContent='Copiado'">Copiar</button></div></div>{% endif %}
+      {% if new_client_token %}<div class="new-token-box"><p>GUÁRDALO AHORA — NO VOLVERÁ A MOSTRARSE — NO LO INCLUYAS EN CAPTURAS</p><div><code id="new-token">{{ new_client_token }}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('new-token').textContent);this.textContent='Copiado'">Copiar</button></div></div>{% endif %}
 
       <div class="integration-grid">
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Formato Anthropic compatible</p></div></div>
+          <div class="integration-warning"><b>¿Aparece “claude no se reconoce”?</b><span>Significa que Claude Code no está instalado o que falta su carpeta en el PATH. Ejecuta completo el paso 2.</span></div>
           <ol class="setup-steps">
             <li><b>Genera tu token Nexia</b><span>Usa el botón superior. El token empieza con <code>nxa_</code>.</span></li>
-            <li><b>Instala Claude Code en PowerShell</b><span>Ejecuta el instalador oficial:</span></li>
+            <li><b>Instala y verifica Claude Code</b><span>Copia y ejecuta todo este bloque en PowerShell. Instala Claude Code, corrige el PATH y muestra la versión:</span></li>
           </ol>
-          <div class="code-copy"><button type="button" data-copy-target="claude-install">Copiar</button><pre><code id="claude-install">irm https://claude.ai/install.ps1 | iex</code></pre></div>
+          <div class="code-copy"><button type="button" data-copy-target="claude-install">Copiar</button><pre><code id="claude-install">irm https://claude.ai/install.ps1 | iex
+$claudeDir = "$env:USERPROFILE\.local\bin"
+$env:Path = "$env:Path;$claudeDir"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ";") -notcontains $claudeDir) {
+  [Environment]::SetEnvironmentVariable("Path", "$userPath;$claudeDir", "User")
+}
+claude --version</code></pre></div>
+          <details class="persistent-config install-help"><summary>Si el instalador falla o sigue sin reconocer claude</summary><p>Comprueba si existe el ejecutable:</p><div class="code-copy"><button type="button" data-copy-target="claude-diagnose">Copiar</button><pre><code id="claude-diagnose">Test-Path "$env:USERPROFILE\.local\bin\claude.exe"
+& "$env:USERPROFILE\.local\bin\claude.exe" --version</code></pre></div><p>Si el primer comando devuelve <code>False</code>, instala la alternativa oficial con:</p><div class="code-copy"><button type="button" data-copy-target="claude-winget">Copiar</button><pre><code id="claude-winget">winget install Anthropic.ClaudeCode</code></pre></div></details>
           <ol class="setup-steps" start="3">
             <li><b>Conecta Claude Code con Nexia</b><span>En la carpeta de tu proyecto, abre PowerShell y ejecuta:</span></li>
           </ol>
