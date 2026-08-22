@@ -1029,14 +1029,14 @@ html[data-theme="dark"] .theme-toggle .theme-moon { display: inline; }
 .message-attachment > div { min-width: 0; display: grid; }
 .message-attachment b { overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .message-attachment small { color: var(--muted); font-size: 8px; }
-.thought-panel { max-width: 680px; margin-top: 13px; overflow: hidden; background: color-mix(in srgb, var(--paper) 70%, var(--white)); border: 1px solid var(--line); border-radius: 12px; }
-.thought-panel > summary { display: flex; align-items: center; gap: 7px; padding: 10px 12px; color: var(--muted); list-style: none; font-size: 10px; font-weight: 800; cursor: pointer; user-select: none; }
-.thought-panel > summary::-webkit-details-marker { display: none; }
-.thought-panel > summary span { color: var(--violet); }
-.thought-panel > summary em { margin-left: auto; font-size: 8px; font-style: normal; font-weight: 600; }
-.thought-panel[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
-.thought-body { padding: 12px; }
-.thought-note { margin: 0 0 11px !important; color: var(--muted) !important; font-size: 9px !important; line-height: 1.5 !important; }
+.thinking-panel { max-width: 680px; margin-top: 9px; overflow: hidden; background: color-mix(in srgb, var(--paper) 70%, var(--white)); border: 1px solid var(--line); border-radius: 12px; }
+.thinking-panel > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--ink); list-style: none; font-size: 10px; font-weight: 800; cursor: pointer; user-select: none; }
+.thinking-panel > summary::-webkit-details-marker { display: none; }
+.thinking-panel > summary em { margin-left: auto; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 600; }
+.thinking-panel[open] > summary { border-bottom: 1px solid var(--line); }
+.thinking-body { padding: 10px; }
+.thinking-spinner { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--violet) 25%, transparent); border-top-color: var(--violet); border-radius: 50%; animation: thinking-spin .8s linear infinite; }
+@keyframes thinking-spin { to { transform: rotate(360deg); } }
 .agent-timeline { display: grid; gap: 7px; }
 .agent-step { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 8px 9px; background: var(--white); border: 1px solid var(--line); border-radius: 9px; }
 .agent-step > i { width: 8px; height: 8px; background: #b8b2aa; border-radius: 50%; }
@@ -1046,10 +1046,6 @@ html[data-theme="dark"] .theme-toggle .theme-moon { display: inline; }
 .agent-step b { color: var(--ink); font-size: 9px; }
 .agent-step span { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .agent-step em { color: var(--muted); font-size: 7px; font-style: normal; text-transform: uppercase; }
-.technical-output { margin-top: 10px; overflow: hidden; background: #282724; border-radius: 10px; }
-.technical-output > div { display: flex; justify-content: space-between; padding: 8px 10px; color: #d5cec4; border-bottom: 1px solid #44413c; font-size: 8px; }
-.technical-output button { padding: 0; color: #dca58f; background: none; border: 0; font-size: 8px; cursor: pointer; }
-.technical-output pre { max-height: 360px; overflow: auto; margin: 0; padding: 13px; color: #ece7df; font: 9px/1.65 Consolas, monospace; white-space: pre; }
 .upload-strip { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 9px; padding-bottom: 2px; }
 .upload-chip { min-width: 170px; max-width: 230px; display: grid; grid-template-columns: 32px minmax(0,1fr) 20px; align-items: center; gap: 7px; padding: 6px 7px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }
 .upload-chip > img { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; }

@@ -53,20 +53,6 @@
         <label for="base">URL base de la API</label>
         <input id="base" name="api_base_url" type="url" value="{{ settings.api_base_url }}" required />
       </div>
-      <div class="form-field span-2">
-        <label for="image-key">Clave API para generación de imágenes</label>
-        <input id="image-key" name="image_api_key" type="password" autocomplete="off"
-          placeholder="{% if settings.image_api_key %}Clave cifrada y configurada{% else %}sk-...{% endif %}" />
-        <small>Proveedor independiente compatible con OpenAI Images. Disponible para Premium.</small>
-      </div>
-      <div class="form-field">
-        <label for="image-model">Modelo de imágenes</label>
-        <input id="image-model" name="image_model" value="{{ settings.image_model }}" required />
-      </div>
-      <div class="form-field">
-        <label for="image-base">URL base para imágenes</label>
-        <input id="image-base" name="image_api_base_url" type="url" value="{{ settings.image_api_base_url }}" required />
-      </div>
       <div class="settings-action">
         <button class="btn btn-primary btn-full" type="submit">Guardar cambios</button>
       </div>

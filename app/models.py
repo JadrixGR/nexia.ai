@@ -185,13 +185,10 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     trial_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     daily_message_limit: Mapped[int] = mapped_column(Integer, default=3)
-    # El texto y las imágenes pueden usar proveedores distintos.
+    # Campos heredados de consumo; se conservan para instalaciones anteriores.
     daily_image_limit: Mapped[int] = mapped_column(Integer, default=0)
     default_model: Mapped[str] = mapped_column(String(80), default="claude-sonnet-4-6")
     api_base_url: Mapped[str] = mapped_column(String(200), default="https://api.mwapi.dev/v1")
-    image_model: Mapped[str] = mapped_column(String(80), default="gpt-image-2")
-    image_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    image_api_base_url: Mapped[str] = mapped_column(String(200), default="https://api.openai.com/v1")
 
 
 def _add_missing_columns() -> None:
@@ -244,20 +241,6 @@ def _add_missing_columns() -> None:
                 if name not in message_columns:
                     connection.execute(text(f"ALTER TABLE messages ADD COLUMN {name} {sql_type}"))
 
-    inspector = inspect(engine)
-    if "settings" in inspector.get_table_names():
-        setting_columns = {column["name"] for column in inspector.get_columns("settings")}
-        setting_additions = {
-            "image_model": "VARCHAR(80) DEFAULT 'gpt-image-2' NOT NULL",
-            "image_api_key": "TEXT",
-            "image_api_base_url": "VARCHAR(200) DEFAULT 'https://api.openai.com/v1' NOT NULL",
-        }
-        with engine.begin() as connection:
-            for name, sql_type in setting_additions.items():
-                if name not in setting_columns:
-                    connection.execute(text(f"ALTER TABLE settings ADD COLUMN {name} {sql_type}"))
-
-
 def _adopt_legacy_messages() -> None:
     """Agrupa el historial antiguo de cada cliente en una conversación."""
     with SessionLocal() as db:
@@ -302,26 +285,12 @@ def init_db() -> None:
                 daily_image_limit=0,
                 api_base_url=os.environ.get("API_BASE_URL", "https://api.mwapi.dev/v1"),
                 default_model="claude-sonnet-4-6",
-                image_api_key=(
-                    encrypt_api_key(os.environ["OPENAI_API_KEY"])
-                    if os.environ.get("OPENAI_API_KEY") else None
-                ),
-                image_api_base_url=os.environ.get("IMAGE_API_BASE_URL", "https://api.openai.com/v1"),
-                image_model=os.environ.get("IMAGE_MODEL", "gpt-image-2"),
             )
             db.add(settings)
             db.commit()
         elif settings.trial_api_key and not is_encrypted_api_key(settings.trial_api_key):
             settings.trial_api_key = encrypt_api_key(settings.trial_api_key)
             db.commit()
-
-        if not settings.image_api_key and os.environ.get("OPENAI_API_KEY"):
-            settings.image_api_key = encrypt_api_key(os.environ["OPENAI_API_KEY"])
-        if not settings.image_model:
-            settings.image_model = os.environ.get("IMAGE_MODEL", "gpt-image-2")
-        if not settings.image_api_base_url:
-            settings.image_api_base_url = os.environ.get("IMAGE_API_BASE_URL", "https://api.openai.com/v1")
-        db.commit()
 
         # Cifra claves en texto plano de versiones anteriores.
         for user in db.query(User).filter(User.api_key.is_not(None)).all():

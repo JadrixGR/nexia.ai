@@ -69,7 +69,7 @@ from .integrations import (
     responses_sse,
     responses_to_chat,
 )
-from .images import generate_image, is_image_request
+from .images import is_image_request
 from .uploads import MAX_UPLOAD_BYTES, extract_text, is_image, validate_upload
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -82,7 +82,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.1.0")
+app = FastAPI(title="Nexia", version="3.1.1")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -462,7 +462,6 @@ def chat_page(
     history = []
     artifacts = {}
     message_attachments = {}
-    agent_traces = {}
     if selected:
         history = (
             db.query(Message)
@@ -489,13 +488,6 @@ def chat_page(
         ):
             if attachment.message_id:
                 message_attachments.setdefault(attachment.message_id, []).append(attachment)
-        for message in history:
-            if not message.agent_trace:
-                continue
-            try:
-                agent_traces[message.id] = json.loads(message.agent_trace)
-            except (json.JSONDecodeError, TypeError):
-                agent_traces[message.id] = []
 
     return templates.TemplateResponse(
         request,
@@ -510,7 +502,6 @@ def chat_page(
             history=history,
             artifacts=artifacts,
             message_attachments=message_attachments,
-            agent_traces=agent_traces,
             active_model=choose_allowed_model(
                 user,
                 selected.model if selected else "",
@@ -640,9 +631,6 @@ def admin_settings(
     daily_message_limit: int = Form(...),
     api_base_url: str = Form(...),
     default_model: str = Form(...),
-    image_api_key: str = Form(""),
-    image_api_base_url: str = Form("https://api.openai.com/v1"),
-    image_model: str = Form("gpt-image-2"),
     db: Session = Depends(get_db),
 ):
     admin = require_admin(request, db)
@@ -657,13 +645,6 @@ def admin_settings(
     settings.default_model = (
         default_model if default_model in MODEL_IDS else "claude-sonnet-4-6"
     )
-    if image_api_key.strip():
-        clean_image_key = image_api_key.strip()
-        if not clean_image_key.startswith("sk-"):
-            return RedirectResponse("/admin?error=La+clave+de+imágenes+debe+comenzar+con+sk-", 303)
-        settings.image_api_key = encrypt_api_key(clean_image_key)
-    settings.image_api_base_url = image_api_base_url.strip().rstrip("/") or "https://api.openai.com/v1"
-    settings.image_model = image_model.strip()[:80] or "gpt-image-2"
     db.commit()
     return RedirectResponse("/admin?success=Configuración+guardada", 303)
 
@@ -888,18 +869,9 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
     model = choose_allowed_model(user, requested_model, get_settings(db).default_model)
     artifact_kind = requested_kind(prompt)
     image_task = is_image_request(prompt)
-    if image_task and effective_plan(user) != "premium":
-        return JSONResponse(
-            {"error": "La generación de imágenes requiere el plan Premium.", "upgrade_required": True},
-            403,
-        )
-    image_settings = get_settings(db)
-    image_api_key = decrypt_api_key(image_settings.image_api_key) if image_settings.image_api_key else ""
-    if image_task and not image_api_key:
-        return JSONResponse(
-            {"error": "La generación de imágenes aún no está configurada por el administrador."},
-            503,
-        )
+    if image_task and artifact_kind is None:
+        # Claude no genera píxeles, pero sí puede crear una ilustración vectorial como código SVG.
+        artifact_kind = "svg"
 
     conversation = None
     raw_conversation_id = body.get("conversation_id")
@@ -966,6 +938,13 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
             "completo que se debe guardar, usando bloques de código con su lenguaje cuando corresponda. "
             "No incluyas instrucciones para copiar, comprimir ni ejecutar comandos de descarga."
         )
+        if artifact_kind == "docx":
+            artifact_instruction += " Para Word entrega Markdown estructurado, nunca HTML."
+        elif artifact_kind == "svg":
+            artifact_instruction += (
+                " Claude no genera imágenes raster. Crea una ilustración SVG completa, autocontenida, "
+                "sin scripts, recursos externos ni explicaciones fuera de un único bloque ```svg."
+            )
     provider_messages = [{
         "role": "system",
         "content": (
@@ -1016,55 +995,9 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         ]
         yield _sse_stage("analyst", "Analista", "Interpretando la solicitud y los adjuntos…", "running")
 
-        if image_task:
-            yield _sse_stage("analyst", "Analista", "Solicitud visual preparada.", "completed")
-            yield _sse_stage("creator", "Creador visual", "Generando la imagen en segundo plano…", "running")
-            try:
-                generated = await generate_image(
-                    api_key=image_api_key,
-                    base_url=image_settings.image_api_base_url,
-                    model=image_settings.image_model,
-                    prompt=prompt,
-                )
-            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-                refund(db, user, access)
-                yield _sse_error(f"No se pudo generar la imagen: {exc}")
-                return
-            artifact = Artifact(
-                user_id=user.id,
-                conversation_id=conversation_id,
-                filename=generated.filename,
-                mime_type=generated.mime_type,
-                size=len(generated.data),
-                data=generated.data,
-            )
-            db.add(artifact)
-            db.flush()
-            summary = "Imagen creada y lista para visualizar o descargar."
-            db.add(Message(
-                user_id=user.id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=summary,
-                artifact_id=artifact.id,
-                technical_content=f"Prompt visual enviado al modelo {image_settings.image_model}:\n{prompt}",
-                response_kind="image",
-                agent_trace=json.dumps(agent_trace, ensure_ascii=False),
-            ))
-            saved_conversation = db.get(Conversation, conversation_id)
-            if saved_conversation:
-                saved_conversation.updated_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
-            db.commit()
-            yield _sse_stage("creator", "Creador visual", "Imagen generada.", "completed")
-            yield _sse_stage("reviewer", "Revisor", "Formato y entrega validados.", "completed")
-            yield f"data: {json.dumps({'summary': summary})}\n\n"
-            yield f"data: {json.dumps({'technical': f'Prompt visual enviado al modelo {image_settings.image_model}:\n{prompt}'})}\n\n"
-            yield f"data: {json.dumps({'artifact': _artifact_payload(artifact)})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
         yield _sse_stage("analyst", "Analista", "Solicitud preparada para el modelo.", "completed")
-        yield _sse_stage("creator", "Creador", "Redactando y construyendo en segundo plano…", "running")
+        creator_label = "Ilustrador SVG" if artifact_kind == "svg" else "Creador"
+        yield _sse_stage("creator", creator_label, "Redactando y construyendo en segundo plano…", "running")
         collected: list[str] = []
         try:
             async with httpx.AsyncClient(
@@ -1135,10 +1068,12 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
                     db.flush()
             except Exception as exc:
                 build_error = exc.__class__.__name__
-        if artifact_kind and artifact:
+        if artifact_kind == "svg" and artifact:
+            visible_answer = "He creado una ilustración vectorial SVG con Claude y está lista para descargar."
+        elif artifact_kind and artifact:
             visible_answer = f"He creado {artifact.filename} y está listo para descargar."
         elif artifact_kind:
-            visible_answer = "Preparé el contenido, pero no pude construir el archivo descargable. Puedes revisar el trabajo técnico en Pensamiento."
+            visible_answer = "No pude construir un archivo válido. Inténtalo otra vez indicando el formato y el contenido que necesitas."
         else:
             visible_answer = answer
         if build_error:
@@ -1163,7 +1098,6 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         yield _sse_stage("reviewer", "Revisor", "Entrega revisada y preparada.", "completed")
         if artifact_kind:
             yield f"data: {json.dumps({'summary': visible_answer})}\n\n"
-            yield f"data: {json.dumps({'technical': answer})}\n\n"
         if artifact:
             yield f"data: {json.dumps({'artifact': _artifact_payload(artifact)})}\n\n"
         yield "data: [DONE]\n\n"
@@ -1247,7 +1181,11 @@ def preview_artifact(
     return Response(
         content=artifact.data,
         media_type=artifact.mime_type,
-        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        },
     )
 
 
@@ -1399,5 +1337,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.1.0"),
+        "version": os.environ.get("APP_VERSION", "3.1.1"),
     }

@@ -131,26 +131,6 @@
             <span>↓</span><div><b>{{ artifact.filename }}</b><small>{{ (artifact.size / 1024)|round(1) }} KB · listo para descargar</small></div><em>Descargar</em>
           </a>
           {% endif %}
-          {% if message.role == 'assistant' and (message.technical_content or agent_traces.get(message.id)) %}
-          <details class="thought-panel">
-            <summary><span>✦</span> Pensamiento <em>Ver actividad</em></summary>
-            <div class="thought-body">
-              <p class="thought-note">Actividad resumida y registro técnico. El razonamiento privado del modelo no se muestra.</p>
-              {% if agent_traces.get(message.id) %}
-              <div class="agent-timeline">
-                {% for agent in agent_traces.get(message.id) %}
-                <div class="agent-step {{ agent.status }}" data-stage="{{ agent.id }}">
-                  <i></i><div><b>{{ agent.label }}</b><span>{{ agent.detail }}</span></div><em>{{ 'Listo' if agent.status == 'completed' else 'Trabajando' }}</em>
-                </div>
-                {% endfor %}
-              </div>
-              {% endif %}
-              {% if message.technical_content %}
-              <div class="technical-output"><div><b>Trabajo técnico</b><button type="button" data-copy-technical>Copiar</button></div><pre><code>{{ message.technical_content }}</code></pre></div>
-              {% endif %}
-            </div>
-          </details>
-          {% endif %}
         </div>
       </article>
       {% endfor %}
@@ -169,7 +149,6 @@
               <option value="{{ model.id }}" {% if active_model == model.id %}selected{% endif %} {% if not model.allowed %}disabled{% endif %}>{{ model.label }}{% if not model.allowed %} · Premium 🔒{% endif %}</option>
               {% endfor %}
             </select>
-            <span class="reasoning-badge">✦ Razonamiento</span>
           </div>
           <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
         </div>
@@ -261,19 +240,17 @@
     content.appendChild(list);
   }
 
-  function addAgentPanel(target) {
+  function addThinkingPanel(target) {
     const details = document.createElement("details");
-    details.className = "thought-panel";
+    details.className = "thinking-panel";
+    details.open = true;
     const summary = document.createElement("summary");
-    summary.innerHTML = "<span>✦</span> Pensamiento <em>Ver actividad</em>";
+    summary.innerHTML = "<span class=\"thinking-spinner\"></span> Pensando… <em>Actividad</em>";
     const body = document.createElement("div");
-    body.className = "thought-body";
-    const note = document.createElement("p");
-    note.className = "thought-note";
-    note.textContent = "Actividad resumida y registro técnico. El razonamiento privado del modelo no se muestra.";
+    body.className = "thinking-body";
     const timeline = document.createElement("div");
     timeline.className = "agent-timeline";
-    body.append(note, timeline);
+    body.append(timeline);
     details.append(summary, body);
     target.article.querySelector(".message-content").appendChild(details);
     target.thought = { details, body, timeline };
@@ -281,7 +258,7 @@
   }
 
   function updateStage(target, stage) {
-    const thought = target.thought || addAgentPanel(target);
+    const thought = target.thought || addThinkingPanel(target);
     let row = thought.timeline.querySelector('[data-stage="' + stage.id + '"]');
     if (!row) {
       row = document.createElement("div");
@@ -293,36 +270,6 @@
     row.querySelector("b").textContent = stage.label;
     row.querySelector("span").textContent = stage.detail;
     row.querySelector("em").textContent = stage.status === "completed" ? "Listo" : "Trabajando";
-  }
-
-  function addTechnicalOutput(target, technical) {
-    if (!technical) return;
-    const thought = target.thought || addAgentPanel(target);
-    let output = thought.body.querySelector(".technical-output");
-    if (!output) {
-      output = document.createElement("div");
-      output.className = "technical-output";
-      const head = document.createElement("div");
-      const label = document.createElement("b");
-      label.textContent = "Trabajo técnico";
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.textContent = "Copiar";
-      copy.addEventListener("click", async () => {
-        await navigator.clipboard.writeText(output.querySelector("code").textContent);
-        copy.textContent = "Copiado";
-        setTimeout(() => copy.textContent = "Copiar", 1200);
-      });
-      head.append(label, copy);
-      const pre = document.createElement("pre");
-      const code = document.createElement("code");
-      code.textContent = technical;
-      pre.appendChild(code);
-      output.append(head, pre);
-      thought.body.appendChild(output);
-    } else {
-      output.querySelector("code").textContent = technical;
-    }
   }
 
   function addArtifact(target, artifact) {
@@ -475,8 +422,8 @@
     input.value = "";
     input.style.height = "auto";
     addMessage("user", message || "Analiza los archivos adjuntos.", sentUploads);
-    const target = addMessage("assistant", "Coordinando agentes…");
-    addAgentPanel(target);
+    const target = addMessage("assistant", "");
+    addThinkingPanel(target);
     target.article.classList.add("loading");
     let answer = "";
 
@@ -535,7 +482,6 @@
           }
           if (chunk.stage) {
             updateStage(target, chunk.stage);
-            target.paragraph.textContent = chunk.stage.detail;
             scrollToEnd();
             continue;
           }
@@ -543,10 +489,6 @@
             answer = chunk.summary;
             target.paragraph.textContent = chunk.summary;
             target.article.classList.remove("loading");
-            continue;
-          }
-          if (chunk.technical) {
-            addTechnicalOutput(target, chunk.technical);
             continue;
           }
           if (chunk.artifact) {
@@ -568,6 +510,7 @@
       target.article.classList.add("error-message");
     } finally {
       target.article.classList.remove("loading");
+      target.thought?.details.remove();
       busy = false;
       sendButton.disabled = false;
       refreshUsage();
@@ -595,14 +538,6 @@
   document.querySelectorAll("[data-delete]").forEach(bindDelete);
   attachButton.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
-  document.querySelectorAll("[data-copy-technical]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const code = button.closest(".technical-output")?.querySelector("code")?.textContent || "";
-      await navigator.clipboard.writeText(code);
-      button.textContent = "Copiado";
-      setTimeout(() => button.textContent = "Copiar", 1200);
-    });
-  });
   document.querySelectorAll("[data-prompt]").forEach((button) => {
     button.addEventListener("click", () => {
       input.value = button.dataset.prompt;

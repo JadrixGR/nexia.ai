@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
-import base64
+import io
 import os
 import unittest
 from urllib.parse import parse_qs, urlparse
@@ -22,7 +22,7 @@ os.environ.pop("GOOGLE_CLIENT_SECRET", None)
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, Setting, User, engine, init_db
+from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, User, engine, init_db
 from app.security import encrypt_api_key, generate_client_token, make_csrf
 from app.mailer import send_verification_email
 
@@ -56,17 +56,6 @@ class FakeMailResponse:
     status_code = 200
 
 
-class FakeImageResponse:
-    status_code = 200
-    text = "ok"
-
-    def json(self):
-        one_pixel_png = base64.b64encode(
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        ).decode("ascii")
-        return {"data": [{"b64_json": one_pixel_png}]}
-
-
 class FakeAsyncClient:
     def __init__(self, *args, **kwargs):
         pass
@@ -84,18 +73,15 @@ class FakeAsyncClient:
         return FakeJSONResponse()
 
 
-class FakeImageAsyncClient:
-    def __init__(self, *args, **kwargs):
-        pass
+class FakeSvgStreamResponse(FakeStreamResponse):
+    async def aiter_lines(self):
+        yield 'data: {"choices":[{"delta":{"content":"```svg\\n<svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 100 100\\"><circle cx=\\"50\\" cy=\\"50\\" r=\\"40\\" fill=\\"coral\\"/></svg>\\n```"}}]}'
+        yield "data: [DONE]"
 
-    async def __aenter__(self):
-        return self
 
-    async def __aexit__(self, _exc_type, _exc, _traceback):
-        return False
-
-    async def post(self, *args, **kwargs):
-        return FakeImageResponse()
+class FakeSvgAsyncClient(FakeAsyncClient):
+    def stream(self, *args, **kwargs):
+        return FakeSvgStreamResponse()
 
 
 class NexiaFlowTests(unittest.TestCase):
@@ -243,15 +229,45 @@ class NexiaFlowTests(unittest.TestCase):
         page = self.client.get(f"/chat?conversation={conversation_id}")
         self.assertIn("informe.txt", page.text)
 
-    def test_premium_image_generation_creates_inline_artifact(self):
+    def test_doc_request_creates_real_word_file_without_showing_html(self):
         user_id = self.register_and_verify()
         self.activate(user_id, premium=True)
+        with patch("app.main.httpx.AsyncClient", FakeAsyncClient):
+            response = self.client.post(
+                "/api/chat",
+                json={
+                    "message": "Hazme un documento de compra y venta de Perú, dame un formato .doc para descargarlo",
+                    "model": "claude-opus-5",
+                },
+                headers={"X-CSRF-Token": make_csrf(user_id)},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"artifact"', response.text)
         with SessionLocal() as db:
-            settings = db.get(Setting, 1)
-            settings.image_api_key = encrypt_api_key("sk-test-image-key")
-            settings.image_model = "gpt-image-2"
-            db.commit()
-        with patch("app.images.httpx.AsyncClient", FakeImageAsyncClient):
+            artifact = db.query(Artifact).filter(Artifact.user_id == user_id).one()
+            reply = db.query(Message).filter(Message.user_id == user_id, Message.role == "assistant").one()
+            self.assertTrue(artifact.filename.endswith(".docx"))
+            self.assertTrue(artifact.data.startswith(b"PK"))
+            self.assertNotIn("<html", reply.content.lower())
+            from docx import Document
+
+            word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(artifact.data)).paragraphs)
+            self.assertIn("Pacman", word_text)
+            self.assertNotIn("<html", word_text.lower())
+            artifact_id = artifact.id
+            conversation_id = artifact.conversation_id
+        download = self.client.get(f"/api/artifacts/{artifact_id}/download")
+        self.assertIn("wordprocessingml", download.headers["content-type"])
+        page = self.client.get(f"/chat?conversation={conversation_id}")
+        self.assertIn("documento-nexia.docx", page.text)
+        self.assertNotIn("Pensamiento", page.text)
+        self.assertNotIn("&lt;!doctype html&gt;", page.text.lower())
+        self.assertIn("Pensando…", page.text)
+
+    def test_claude_image_request_creates_safe_svg_artifact(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id, premium=True)
+        with patch("app.main.httpx.AsyncClient", FakeSvgAsyncClient):
             response = self.client.post(
                 "/api/chat",
                 json={"message": "Crea una imagen de una ciudad futurista", "model": "claude-opus-5"},
@@ -261,11 +277,13 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertIn('"is_image": true', response.text)
         with SessionLocal() as db:
             artifact = db.query(Artifact).filter(Artifact.user_id == user_id).one()
-            self.assertEqual(artifact.mime_type, "image/png")
+            self.assertEqual(artifact.mime_type, "image/svg+xml")
+            self.assertIn(b"<svg", artifact.data)
             artifact_id = artifact.id
         preview = self.client.get(f"/api/artifacts/{artifact_id}/preview")
         self.assertEqual(preview.status_code, 200)
-        self.assertEqual(preview.headers["content-type"], "image/png")
+        self.assertEqual(preview.headers["content-type"], "image/svg+xml")
+        self.assertIn("sandbox", preview.headers["content-security-policy"])
 
     def test_codex_and_claude_code_use_personal_token_and_credits(self):
         user_id = self.register_and_verify()

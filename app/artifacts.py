@@ -5,7 +5,7 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass
-from html import escape
+from html import escape, unescape
 
 
 @dataclass
@@ -23,7 +23,7 @@ def requested_kind(prompt: str) -> str | None:
         return "pdf"
     if re.search(r"\b(excel|xlsx|hoja de c[aá]lculo)\b", text):
         return "xlsx"
-    if re.search(r"\b(word|docx)\b", text) or re.search(r"documento.{0,25}\bdoc\b", text):
+    if re.search(r"\bword\b", text) or re.search(r"(?<![\w])\.?docx?(?![\w])", text):
         return "docx"
     if re.search(r"\b(html)\b", text) and re.search(r"\b(archivo|formato|entrega|descarga|crea|haz)\w*\b", text):
         return "html"
@@ -39,6 +39,35 @@ def _best_html(answer: str) -> str:
         if language in {"html", "htm"} or "<!doctype html" in code.lower() or "<html" in code.lower():
             return code
     return answer if "<html" in answer.lower() else f"<!doctype html><html><meta charset='utf-8'><body><pre>{escape(answer)}</pre></body></html>"
+
+
+def _document_text(answer: str) -> str:
+    """Convierte HTML accidental del modelo a texto estructurado para Word/PDF."""
+    if not re.search(r"<[/!]?[a-z][^>]*>", answer, re.I):
+        return answer
+    clean = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", answer, flags=re.I | re.S)
+    clean = re.sub(r"<h1\b[^>]*>", "\n# ", clean, flags=re.I)
+    clean = re.sub(r"<h2\b[^>]*>", "\n## ", clean, flags=re.I)
+    clean = re.sub(r"<h[3-6]\b[^>]*>", "\n### ", clean, flags=re.I)
+    clean = re.sub(r"<li\b[^>]*>", "\n- ", clean, flags=re.I)
+    clean = re.sub(r"<(br|/p|/div|/li|/h[1-6]|/tr)>\s*", "\n", clean, flags=re.I)
+    clean = re.sub(r"</t[dh]>\s*", " | ", clean, flags=re.I)
+    clean = re.sub(r"<[^>]+>", "", clean)
+    clean = unescape(clean).replace("\xa0", " ")
+    return re.sub(r"\n{3,}", "\n\n", clean).strip()
+
+
+def _best_svg(answer: str) -> str:
+    candidates = [code for language, code in _code_blocks(answer) if language == "svg"]
+    source = candidates[0] if candidates else answer
+    match = re.search(r"<svg\b[^>]*>.*?</svg>", source, re.I | re.S)
+    if not match:
+        raise ValueError("El modelo no devolvió un SVG válido.")
+    svg = match.group(0)
+    svg = re.sub(r"<(script|foreignObject)\b[^>]*>.*?</\1>", "", svg, flags=re.I | re.S)
+    svg = re.sub(r"\s+on[a-z]+\s*=\s*(['\"]).*?\1", "", svg, flags=re.I | re.S)
+    svg = re.sub(r"\s+(?:xlink:)?href\s*=\s*(['\"])(?!#).*?\1", "", svg, flags=re.I | re.S)
+    return svg
 
 
 def _zip(answer: str) -> BuiltArtifact:
@@ -77,7 +106,7 @@ def _pdf(answer: str) -> BuiltArtifact:
     doc = SimpleDocTemplate(memory, pagesize=A4, rightMargin=22*mm, leftMargin=22*mm, topMargin=22*mm, bottomMargin=22*mm)
     styles = getSampleStyleSheet()
     story = [Paragraph("Documento generado por Nexia AI", styles["Title"]), Spacer(1, 8)]
-    for block in re.split(r"\n\s*\n", answer.strip()):
+    for block in re.split(r"\n\s*\n", _document_text(answer)):
         clean = escape(block).replace("\n", "<br/>")
         story.extend([Paragraph(clean or " ", styles["BodyText"]), Spacer(1, 8)])
     doc.build(story)
@@ -89,7 +118,7 @@ def _docx(answer: str) -> BuiltArtifact:
 
     document = Document()
     document.add_heading("Documento generado por Nexia AI", 0)
-    for line in answer.splitlines():
+    for line in _document_text(answer).splitlines():
         clean = line.strip()
         if clean.startswith("### "):
             document.add_heading(clean[4:], level=3)
@@ -149,4 +178,6 @@ def build_artifact(kind: str | None, answer: str) -> BuiltArtifact | None:
         return _xlsx(answer)
     if kind == "html":
         return BuiltArtifact("proyecto-nexia.html", "text/html; charset=utf-8", _best_html(answer).encode("utf-8"))
+    if kind == "svg":
+        return BuiltArtifact("imagen-nexia.svg", "image/svg+xml", _best_svg(answer).encode("utf-8"))
     return None
