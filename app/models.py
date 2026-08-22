@@ -60,7 +60,7 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
-    # La API key se guarda cifrada. credits es lo asignado y credits_used lo consumido.
+    # La API key se guarda cifrada. Las columnas de créditos se conservan solo por compatibilidad histórica.
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     credits: Mapped[int] = mapped_column(Integer, default=0)

@@ -1,7 +1,7 @@
 # Nexia AI
 
 Plataforma SaaS multiusuario de IA construida con FastAPI. Incluye cuentas verificadas,
-planes Free/Premium, chats privados, control de créditos, archivos descargables y acceso
+planes Free/Premium, chats privados, saldo real de API, archivos descargables y acceso
 desde Claude Code o ChatGPT Codex mediante un token personal.
 
 ## Funciones
@@ -18,8 +18,8 @@ desde Claude Code o ChatGPT Codex mediante un token personal.
 - Ilustraciones vectoriales SVG creadas por Claude, sin una API de imágenes adicional.
 - Creación y descarga de ZIP, PDF, XLSX, DOCX y HTML desde el propio chat.
 - Token personal rotatorio para endpoints compatibles con Anthropic y OpenAI Responses.
-- Panel de configuración con cuenta, plan, facturación, días, créditos e integraciones.
-- Panel administrativo para claves del proveedor, créditos, planes y vencimientos.
+- Panel de configuración con cuenta, plan, facturación, días, saldo real e integraciones.
+- Panel administrativo para claves del proveedor, planes y vencimientos.
 - API keys cifradas; los tokens personales se guardan únicamente como hash SHA-256.
 - SQLite en desarrollo y PostgreSQL en producción.
 
@@ -69,16 +69,14 @@ En Google Cloud crea un cliente OAuth web y autoriza:
 
 Define `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `APP_BASE_URL` (sin `/` final).
 
-## Planes y saldo
+## Planes y saldo real
 
 El control se aplica en el servidor y también a las integraciones externas.
 
-- Cada respuesta completada consume 1 crédito en una cuenta activa.
-- Si el proveedor falla, Nexia devuelve la reserva.
+- Una cuenta activa utiliza directamente la clave API personal que le asigna el administrador.
+- El saldo disponible se consulta en `GET {API_BASE_URL}/usage` y se actualiza después de cada respuesta.
 - Sin clave activa, la cuenta usa la prueba diaria si existe `TRIAL_API_KEY`.
-- El plan limita los modelos; los créditos limitan cuántas respuestas puede generar.
-- La documentación del proveedor no expone un endpoint de balance, por lo que el saldo
-  externo se consulta manualmente en `https://api.mwapi.dev/reseller`.
+- El plan limita los modelos y el proveedor controla el saldo real de la clave.
 
 ## Archivos descargables
 
@@ -137,13 +135,10 @@ El endpoint Responses traduce mensajes y llamadas de herramientas a
 `POST {API_BASE_URL}/chat/completions`. La ejecución de herramientas requiere que el
 proveedor subyacente acepte herramientas en su formato compatible con OpenAI.
 
-## Créditos Nexia y saldo MWAPI
+## Saldo de la API
 
-La configuración muestra dos valores distintos:
-
-- **Créditos Nexia:** la asignación comercial que Nexia descuenta por respuesta.
-- **Saldo real MWAPI:** el balance o cuota de la clave `sk-...` asignada al cliente,
-  consultado desde el servidor mediante `GET {API_BASE_URL}/usage`.
+La configuración muestra únicamente el balance o cuota real de la clave `sk-...`
+asignada al cliente, consultado desde el servidor mediante `GET {API_BASE_URL}/usage`.
 
 La clave MWAPI se descifra únicamente en el servidor y nunca se devuelve al navegador.
 Las cuentas gratuitas que usan una clave de prueba compartida no pueden consultar el

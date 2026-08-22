@@ -35,18 +35,14 @@
     <div class="sidebar-account">
       <div class="usage-mini">
         <div class="usage-mini-head">
-          <span>{% if status.mode == 'credits' %}Saldo disponible{% else %}Prueba de hoy{% endif %}</span>
+          <span>{% if status.mode == 'api' %}Saldo disponible{% else %}Prueba de hoy{% endif %}</span>
           <b id="sidebar-balance">
-            {% if status.mode == 'credits' %}{{ status.credits_left }}
+            {% if status.mode == 'api' %}—
             {% else %}{{ status.messages_left }}/{{ status.daily_message_limit }}{% endif %}
           </b>
         </div>
-        <div class="progress-track">
-          {% if status.mode == 'credits' %}
-          <span id="sidebar-progress" style="width: {{ 100 - status.credit_used_percent }}%"></span>
-          {% else %}
+        <div class="progress-track" id="sidebar-progress-track" {% if status.mode == 'api' %}hidden{% endif %}>
           <span id="sidebar-progress" style="width: {{ (status.messages_left / status.daily_message_limit * 100) if status.daily_message_limit else 0 }}%"></span>
-          {% endif %}
         </div>
         <a href="/configuracion">Ver consumo <span>→</span></a>
       </div>
@@ -77,7 +73,7 @@
         <span class="plan-pill {{ status.plan }}">{{ status.plan_label }}</span>
         <a class="balance-pill" id="usage" href="/configuracion">
           <i></i>
-          {% if status.mode == 'credits' %}{{ status.credits_left }} créditos
+          {% if status.mode == 'api' %}Saldo —
           {% else %}{{ status.messages_left }} mensajes hoy{% endif %}
         </a>
         <button class="icon-button theme-toggle" data-theme-toggle type="button"><span class="theme-sun">☀</span><span class="theme-moon">☾</span></button>
@@ -330,11 +326,28 @@
     const response = await fetch("/api/status");
     if (!response.ok) return;
     const status = await response.json();
-    if (status.mode === "credits") {
-      usage.innerHTML = "<i></i>" + status.credits_left + " créditos";
-      document.getElementById("sidebar-balance").textContent = status.credits_left;
-      document.getElementById("sidebar-progress").style.width = (100 - status.credit_used_percent) + "%";
+    const progressTrack = document.getElementById("sidebar-progress-track");
+    if (status.mode === "api") {
+      progressTrack.hidden = true;
+      try {
+        const providerResponse = await fetch("/api/provider-usage", { cache: "no-store" });
+        const provider = await providerResponse.json();
+        if (!providerResponse.ok || !provider.available) throw new Error("balance unavailable");
+        let balance = null;
+        if (provider.balance !== null && provider.balance !== undefined) {
+          const amount = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(provider.balance);
+          balance = (provider.currency === "USD" ? "$" : (provider.currency + " ")) + amount;
+        } else if (provider.quota?.remaining !== null && provider.quota?.remaining !== undefined) {
+          balance = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(provider.quota.remaining);
+        }
+        usage.innerHTML = "<i></i>" + (balance ? "Saldo " + balance : "Saldo —");
+        document.getElementById("sidebar-balance").textContent = balance || "—";
+      } catch (_error) {
+        usage.innerHTML = "<i></i>Saldo —";
+        document.getElementById("sidebar-balance").textContent = "—";
+      }
     } else {
+      progressTrack.hidden = false;
       usage.innerHTML = "<i></i>" + status.messages_left + " mensajes hoy";
       document.getElementById("sidebar-balance").textContent = status.messages_left + "/" + status.daily_message_limit;
       document.getElementById("sidebar-progress").style.width =
@@ -583,6 +596,7 @@
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 180) + "px";
   });
+  refreshUsage();
   scrollToEnd();
 </script>
 {% endblock %}

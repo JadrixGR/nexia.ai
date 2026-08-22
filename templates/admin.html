@@ -18,7 +18,7 @@
     <div>
       <p class="dashboard-kicker">ADMINISTRACIÓN</p>
       <h1>Clientes y configuración</h1>
-      <p>Activa cuentas, asigna créditos y controla el proveedor desde un solo lugar.</p>
+      <p>Asigna la API de cada cliente, activa su cuenta y controla los planes desde un solo lugar.</p>
     </div>
     <a class="btn btn-primary" href="/chat">Abrir chat <span>→</span></a>
   </div>
@@ -61,7 +61,7 @@
 
   <div class="clients-heading">
     <div><p class="dashboard-kicker">CUENTAS</p><h2>Clientes <span>{{ rows|length }}</span></h2></div>
-    <p>Los créditos mostrados son el saldo interno de Nexia.</p>
+    <p>El saldo visible para cada cliente proviene directamente de su API.</p>
   </div>
 
   <section class="client-list">
@@ -81,9 +81,9 @@
           <p>{{ row.user.email }}</p>
         </div>
         <div class="client-metrics">
-          <div><span>Disponibles</span><b>{{ row.status.credits_left }}</b></div>
-          <div><span>Usados</span><b>{{ row.status.credits_used }}</b></div>
+          <div><span>API</span><b>{{ 'Activa' if row.status.is_active else 'Sin activar' }}</b></div>
           <div><span>Hoy</span><b>{{ row.status.messages_today }}</b></div>
+          <div><span>Plan</span><b>{{ row.status.plan_label }}</b></div>
         </div>
       </div>
 
@@ -93,10 +93,6 @@
           <label for="key-{{ row.user.id }}">Clave API del cliente</label>
           <input id="key-{{ row.user.id }}" name="api_key" type="password" autocomplete="off"
             placeholder="{% if row.status.has_api_key %}Clave cifrada y configurada{% else %}sk-...{% endif %}" />
-        </div>
-        <div class="form-field credits-field">
-          <label for="credits-{{ row.user.id }}">Añadir créditos</label>
-          <input id="credits-{{ row.user.id }}" name="add_credits" type="number" min="0" value="0" />
         </div>
         <div class="form-field plan-field">
           <label for="plan-{{ row.user.id }}">Plan</label>

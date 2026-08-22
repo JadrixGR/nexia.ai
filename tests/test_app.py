@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.artifacts import build_artifact
-from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, User, engine, init_db
+from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, UsageEvent, User, engine, init_db
 from app.security import encrypt_api_key, generate_client_token, make_csrf
 from app.mailer import send_verification_email
 
@@ -171,7 +171,7 @@ class NexiaFlowTests(unittest.TestCase):
             user = db.get(User, user_id)
             user.api_key = encrypt_api_key("sk-test-client-key")
             user.is_active = True
-            user.credits = 20
+            user.credits = 0
             if premium:
                 user.plan = "premium"
                 now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
@@ -195,7 +195,9 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertEqual(settings.status_code, 200)
         self.assertIn("Correo verificado", settings.text)
         self.assertIn("Claude Code y Codex", settings.text)
-        self.assertIn("SALDO REAL DE TU API MWAPI", settings.text)
+        self.assertIn("SALDO DISPONIBLE", settings.text)
+        self.assertNotIn("CRÉDITOS DISPONIBLES", settings.text)
+        self.assertNotIn("Comprobar en MWAPI", settings.text)
         self.assertIn("irm https://claude.ai/install.ps1 | iex", settings.text)
         self.assertIn("wire_api = \"responses\"", settings.text)
         self.assertIn("requires_openai_auth = false", settings.text)
@@ -436,7 +438,7 @@ Para descargarlo, copia este contenido."""
         self.assertEqual(preview.headers["content-type"], "image/svg+xml")
         self.assertIn("sandbox", preview.headers["content-security-policy"])
 
-    def test_codex_and_claude_code_use_personal_token_and_credits(self):
+    def test_codex_and_claude_code_use_personal_api_without_fictitious_credits(self):
         user_id = self.register_and_verify()
         self.activate(user_id)
         raw, digest, prefix = generate_client_token()
@@ -462,7 +464,23 @@ Para descargarlo, copia este contenido."""
         self.assertEqual(claude.status_code, 200)
         self.assertEqual(claude.json()["type"], "message")
         with SessionLocal() as db:
-            self.assertEqual(db.get(User, user_id).credits_used, 2)
+            self.assertEqual(db.get(User, user_id).credits_used, 0)
+            self.assertEqual(
+                db.query(UsageEvent).filter(UsageEvent.user_id == user_id, UsageEvent.mode == "api").count(),
+                2,
+            )
+
+    def test_active_account_status_and_chat_only_reference_real_api_balance(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        status = self.client.get("/api/status").json()
+        self.assertEqual(status["mode"], "api")
+        self.assertNotIn("credits_left", status)
+        self.assertNotIn("credits_used", status)
+        page = self.client.get("/chat")
+        self.assertIn("Saldo —", page.text)
+        self.assertIn("/api/provider-usage", page.text)
+        self.assertNotIn("créditos", page.text.lower())
 
     def test_conversations_remain_isolated_and_csrf_is_required(self):
         first_user_id = self.register_and_verify("uno@example.com")

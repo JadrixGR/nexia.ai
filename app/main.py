@@ -83,7 +83,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.2.0")
+app = FastAPI(title="Nexia", version="3.3.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -693,7 +693,6 @@ def admin_client(
     request: Request,
     csrf_token: str = Form(...),
     api_key: str = Form(""),
-    add_credits: int = Form(0),
     plan: str = Form("free"),
     premium_days: int = Form(0),
     notes: str = Form(""),
@@ -734,8 +733,6 @@ def admin_client(
                 return RedirectResponse("/admin?error=La+clave+API+debe+comenzar+con+sk-", 303)
             client.api_key = encrypt_api_key(clean_key)
             client.is_active = True
-        if add_credits > 0:
-            client.credits += add_credits
         if plan == "premium":
             had_active_premium = effective_plan(client) == "premium"
             start = client.plan_expires_at if client.plan_expires_at and client.plan_expires_at > utcnow() else utcnow()
@@ -1391,5 +1388,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.2.0"),
+        "version": os.environ.get("APP_VERSION", "3.3.0"),
     }

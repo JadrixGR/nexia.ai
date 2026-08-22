@@ -1,4 +1,4 @@
-"""Control de prueba gratuita, saldo interno y registro de consumo."""
+"""Control de prueba gratuita, acceso por API personal y registro de consumo."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,9 +9,6 @@ from sqlalchemy.orm import Session
 from .models import DailyUsage, Setting, UsageEvent, User
 from .security import decrypt_api_key
 from .plans import allowed_model_ids, days_left, effective_plan
-
-CHAT_COST = 1
-
 
 @dataclass
 class Access:
@@ -53,17 +50,10 @@ def account_status(db: Session, user: User) -> dict:
     db.commit()
     has_key = bool(user.api_key and decrypt_api_key(user.api_key))
     active = bool(user.is_active and has_key)
-    credits_left = max(user.credits - user.credits_used, 0)
-    total = max(user.credits, 0)
-    used_percent = round(min(user.credits_used / total * 100, 100)) if total else 0
     return {
         "email": user.email,
         "is_admin": user.is_admin,
-        "mode": "credits" if active else "trial",
-        "credits_left": credits_left,
-        "credits": total,
-        "credits_used": max(user.credits_used, 0),
-        "credit_used_percent": used_percent,
+        "mode": "api" if active else "trial",
         "is_active": active,
         "has_api_key": has_key,
         "messages_left": max(settings.daily_message_limit - row.messages_used, 0),
@@ -80,7 +70,7 @@ def account_status(db: Session, user: User) -> dict:
 
 
 def consume(db: Session, user: User, model: str) -> Access:
-    """Reserva un crédito o un uso gratuito antes de contactar al proveedor."""
+    """Autoriza la API personal o reserva un uso de la prueba gratuita."""
     settings = get_settings(db)
     row = _today_row(db, user.id)
 
@@ -88,18 +78,10 @@ def consume(db: Session, user: User, model: str) -> Access:
     locked_user = db.query(User).filter(User.id == user.id).with_for_update().one()
     api_key = decrypt_api_key(locked_user.api_key)
     active = bool(locked_user.is_active and api_key)
-    credits_left = max(locked_user.credits - locked_user.credits_used, 0)
 
     if active:
-        if credits_left < CHAT_COST:
-            db.commit()
-            return Access(
-                allowed=False,
-                reason="Tu saldo se agotó. Contacta al administrador para recargar créditos.",
-            )
-        locked_user.credits_used += CHAT_COST
         row.messages_used += 1
-        event = UsageEvent(user_id=user.id, kind="chat", mode="credits", model=model)
+        event = UsageEvent(user_id=user.id, kind="chat", mode="api", model=model)
         db.add(event)
         db.flush()
         event_id = event.id
@@ -108,8 +90,7 @@ def consume(db: Session, user: User, model: str) -> Access:
             allowed=True,
             api_key=api_key,
             base_url=settings.api_base_url.rstrip("/"),
-            mode="credits",
-            remaining=max(locked_user.credits - locked_user.credits_used, 0),
+            mode="api",
             event_id=event_id,
         )
 
@@ -151,8 +132,6 @@ def refund(db: Session, user: User, access: Access) -> None:
     """Revierte exactamente la reserva asociada a una llamada fallida."""
     row = _today_row(db, user.id)
     row.messages_used = max(row.messages_used - 1, 0)
-    if access.mode == "credits":
-        user.credits_used = max(user.credits_used - CHAT_COST, 0)
     if access.event_id:
         event = db.get(UsageEvent, access.event_id)
         if event:

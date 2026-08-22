@@ -48,12 +48,11 @@
           <div class="plan-expiry"><strong>2</strong><span>modelos básicos<br>sin fecha de vencimiento</span></div>
           {% endif %}
         </article>
-        <article class="settings-card credit-card">
-          <span>CRÉDITOS DISPONIBLES</span>
-          <strong>{{ status.credits_left if status.mode == 'credits' else status.messages_left }}</strong>
-          <p>{% if status.mode == 'credits' %}de {{ status.credits }} créditos asignados{% else %}de {{ status.daily_message_limit }} mensajes gratuitos hoy{% endif %}</p>
-          <div class="progress-track"><span style="width: {% if status.mode == 'credits' %}{{ 100 - status.credit_used_percent }}{% else %}{{ (status.messages_left / status.daily_message_limit * 100) if status.daily_message_limit else 0 }}{% endif %}%"></span></div>
-          <small>La compra y renovación se gestiona con el administrador de Nexia.</small>
+        <article class="settings-card real-balance-card" id="provider-balance" data-enabled="{{ 'true' if status.is_active and status.has_api_key else 'false' }}">
+          <span class="real-balance-icon">▤</span>
+          <p>SALDO DISPONIBLE</p>
+          <strong id="provider-balance-value">—</strong>
+          <small id="provider-balance-detail">Consultando el saldo real de tu API…</small>
         </article>
       </div>
       <div class="model-access settings-card">
@@ -69,30 +68,14 @@
     <section class="settings-section" id="consumo">
       <div class="section-title"><div><span>03</span><h2>Consumo</h2></div><p>Actividad reciente</p></div>
       <div class="metric-grid settings-metrics">
-        <article><p>Créditos Nexia usados</p><strong>{{ status.credits_used }}</strong><small>1 crédito por respuesta</small></article>
+        <article><p>Solicitudes hoy</p><strong>{{ status.messages_today }}</strong><small>Uso registrado con tu API</small></article>
         <article><p>Conversaciones</p><strong>{{ conversation_count }}</strong><small>Chats guardados</small></article>
         <article><p>Archivos creados</p><strong>{{ artifact_count }}</strong><small>ZIP, PDF, Excel, Word y HTML</small></article>
-      </div>
-      <div class="settings-card provider-balance-card" id="provider-balance" data-enabled="{{ 'true' if status.is_active and status.has_api_key else 'false' }}">
-        <div class="provider-balance-main">
-          <span class="provider-kicker">SALDO REAL DE TU API MWAPI</span>
-          <strong id="provider-balance-value">—</strong>
-          <p id="provider-balance-detail">Consultando el saldo asociado a tu clave…</p>
-        </div>
-        <div class="provider-balance-stats">
-          <div><span>Solicitudes hoy</span><b id="provider-requests-today">—</b></div>
-          <div><span>Solicitudes totales</span><b id="provider-requests-total">—</b></div>
-          <div><span>Modalidad</span><b id="provider-mode">—</b></div>
-        </div>
-        <div class="provider-balance-actions">
-          <button class="btn btn-quiet" id="refresh-provider-balance" type="button">Actualizar saldo</button>
-          <a href="https://api.mwapi.dev/reseller" target="_blank" rel="noreferrer">Comprobar en MWAPI ↗</a>
-        </div>
       </div>
       <div class="settings-card activity-card">
         <div class="activity-head"><h3>Últimas solicitudes</h3><span>Hasta 30 registros</span></div>
         <div class="activity-table-wrap"><table class="activity-table"><thead><tr><th>Fecha</th><th>Modelo</th><th>Modalidad</th></tr></thead><tbody>
-          {% for event in events %}<tr><td>{{ event.created_at.strftime('%d/%m/%Y · %H:%M') if event.created_at else '—' }}</td><td>{{ event.model }}</td><td><span class="status-tag {{ event.mode }}">{{ 'Créditos' if event.mode == 'credits' else 'Incluido' }}</span></td></tr>
+          {% for event in events %}<tr><td>{{ event.created_at.strftime('%d/%m/%Y · %H:%M') if event.created_at else '—' }}</td><td>{{ event.model }}</td><td><span class="status-tag {{ event.mode }}">{{ 'Prueba' if event.mode == 'trial' else 'API personal' }}</span></td></tr>
           {% else %}<tr><td colspan="3" class="table-empty">Todavía no hay consumo registrado.</td></tr>{% endfor %}
         </tbody></table></div>
       </div>
@@ -134,7 +117,7 @@ claude --model claude-sonnet-4-6</code></pre>
   }
 }</code></pre></div></details>
           <ol class="setup-steps" start="4"><li><b>Verifica la conexión</b><span>Dentro de Claude Code escribe <code>/status</code>. Debe mostrar la URL de Nexia. Después ya puedes pedirle que lea, cree o modifique archivos del proyecto.</span></li></ol>
-          <small>El consumo hecho desde la terminal descuenta los mismos créditos Nexia. Las llamadas de herramientas requieren compatibilidad del modelo proveedor.</small>
+          <small>El consumo hecho desde la terminal utiliza directamente el saldo real de la API asignada a tu cuenta. Las llamadas de herramientas requieren compatibilidad del modelo proveedor.</small>
         </article>
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CX</span><div><h3>ChatGPT Codex</h3><p>Protocolo Responses compatible</p></div></div>
@@ -184,50 +167,34 @@ codex</code></pre></div>
     if (!card) return;
     const value = document.getElementById("provider-balance-value");
     const detail = document.getElementById("provider-balance-detail");
-    const today = document.getElementById("provider-requests-today");
-    const total = document.getElementById("provider-requests-total");
-    const mode = document.getElementById("provider-mode");
-    const refresh = document.getElementById("refresh-provider-balance");
     const formatNumber = (number) => new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(number);
 
     const loadProviderBalance = async () => {
       if (card.dataset.enabled !== "true") {
-        value.textContent = "No asignado";
-        detail.textContent = "Tu cuenta todavía no tiene una clave MWAPI personal activa. El administrador debe asignarla.";
-        refresh.disabled = true;
+        value.textContent = "Sin API activa";
+        detail.textContent = "Activa una API para consultar su saldo real.";
         return;
       }
-      refresh.disabled = true;
-      refresh.textContent = "Consultando…";
-      detail.textContent = "Consultando MWAPI de forma segura…";
+      detail.textContent = "Consultando el saldo real de tu API…";
       try {
         const response = await fetch("/api/provider-usage", { headers: { "Accept": "application/json" }, cache: "no-store" });
         const data = await response.json();
         if (!response.ok || !data.available) throw new Error(data.reason || "unavailable");
         if (data.balance !== null && data.balance !== undefined) {
           value.textContent = `${data.currency === "USD" ? "$" : `${data.currency} `}${formatNumber(data.balance)}`;
-          detail.textContent = "Saldo monetario informado para tu clave MWAPI.";
+          detail.textContent = "Saldo real disponible en tu API";
         } else if (data.quota && data.quota.remaining !== null && data.quota.remaining !== undefined) {
           value.textContent = formatNumber(data.quota.remaining);
-          detail.textContent = data.quota.limit !== null && data.quota.limit !== undefined
-            ? `${formatNumber(data.quota.remaining)} de ${formatNumber(data.quota.limit)} unidades disponibles.`
-            : "Cuota restante informada por MWAPI.";
+          detail.textContent = "Saldo real disponible en tu API";
         } else {
-          value.textContent = "Activa";
-          detail.textContent = "La clave es válida, pero MWAPI no informó un saldo numérico.";
+          value.textContent = "—";
+          detail.textContent = "La API no informó un saldo numérico.";
         }
-        today.textContent = data.requests?.today ?? "—";
-        total.textContent = data.requests?.total ?? "—";
-        mode.textContent = (data.mode || "Activa").replaceAll("_", " ");
       } catch (_error) {
-        value.textContent = "No disponible";
-        detail.textContent = "MWAPI no permitió consultar el saldo en este momento. Tu clave nunca se mostró en el navegador.";
-      } finally {
-        refresh.disabled = false;
-        refresh.textContent = "Actualizar saldo";
+        value.textContent = "—";
+        detail.textContent = "No se pudo consultar el saldo real en este momento.";
       }
     };
-    refresh.addEventListener("click", loadProviderBalance);
     loadProviderBalance();
   })();
 </script>
