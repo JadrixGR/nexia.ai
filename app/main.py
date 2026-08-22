@@ -1399,5 +1399,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.0.0"),
+        "version": os.environ.get("APP_VERSION", "3.1.0"),
     }
