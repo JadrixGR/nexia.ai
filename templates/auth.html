@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'signup' %}Crear cuenta{% else %}Iniciar sesión{% endif %} · Nexia AI{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block body %}
+<main class="auth-layout">
+  <section class="auth-brand-panel">
+    <a class="brand brand-light" href="/">
+      <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
+    </a>
+    <div class="auth-quote">
+      <span class="quote-mark">“</span>
+      <h2>Las mejores ideas comienzan con una buena conversación.</h2>
+      <p>Nexia guarda cada una por separado y te muestra exactamente cuánto consumes.</p>
+    </div>
+    <div class="auth-orbit">
+      <div class="orbit orbit-one"></div>
+      <div class="orbit orbit-two"></div>
+      <div class="orbit-core">N</div>
+    </div>
+  </section>
+
+  <section class="auth-form-panel">
+    <div class="auth-card">
+      <a class="mobile-brand brand" href="/">
+        <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
+      </a>
+      <p class="auth-kicker">{% if mode == 'signup' %}EMPIEZA AHORA{% else %}BIENVENIDO DE NUEVO{% endif %}</p>
+      <h1>{% if mode == 'signup' %}Crea tu cuenta{% else %}Inicia sesión{% endif %}</h1>
+      <p class="auth-subtitle">
+        {% if mode == 'signup' %}Tu espacio de trabajo con IA estará listo en segundos.
+        {% else %}Continúa donde dejaste tus conversaciones.{% endif %}
+      </p>
+
+      {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+      {% if success %}<div class="alert alert-success" role="status">{{ success }}</div>{% endif %}
+
+      {% if google_enabled %}
+      <a class="google-button" href="/auth/google">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.4z"/>
+          <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"/>
+          <path fill="#FBBC05" d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9.1L6.4 14z"/>
+          <path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A9.7 9.7 0 0 0 3.1 7.5l3.3 2.6C7.2 7.7 9.4 5.9 12 5.9z"/>
+        </svg>
+        Continuar con Google
+      </a>
+      <div class="form-divider"><span>o con tu correo</span></div>
+      {% endif %}
+
+      <form method="post" action="{% if mode == 'signup' %}/auth/register{% else %}/auth/login{% endif %}" class="auth-form">
+        {% if mode == 'signup' %}
+        <div class="form-field">
+          <label for="name">Nombre</label>
+          <input id="name" name="name" autocomplete="name" placeholder="¿Cómo te llamas?" />
+        </div>
+        {% endif %}
+        <div class="form-field">
+          <label for="email">Correo electrónico</label>
+          <input id="email" name="email" type="email" autocomplete="email" required placeholder="tu@correo.com" />
+        </div>
+        <div class="form-field">
+          <label for="password">Contraseña</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"
+            required
+            minlength="8"
+            placeholder="Mínimo 8 caracteres"
+          />
+        </div>
+        <button class="btn btn-primary btn-lg btn-full" type="submit">
+          {% if mode == 'signup' %}Crear mi cuenta{% else %}Entrar a Nexia{% endif %} <span>→</span>
+        </button>
+      </form>
+
+      {% if not google_enabled %}
+      <p class="setup-hint">El acceso con Google aparecerá al configurar sus credenciales.</p>
+      {% endif %}
+      <p class="auth-switch">
+        {% if mode == 'signup' %}
+          ¿Ya tienes cuenta? <a href="/auth">Inicia sesión</a>
+        {% else %}
+          ¿Aún no tienes cuenta? <a href="/auth?mode=signup">Créala gratis</a>
+        {% endif %}
+      </p>
+    </div>
+  </section>
+</main>
+{% endblock %}

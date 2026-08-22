@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+{% block title %}Chats · Nexia AI{% endblock %}
+{% block body_class %}app-page{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <aside class="chat-sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <a class="brand brand-light" href="/">
+        <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
+      </a>
+      <button class="icon-button sidebar-close" id="sidebar-close" aria-label="Cerrar menú">×</button>
+    </div>
+
+    <a class="new-chat-button" href="/chat?new=1">
+      <span>＋</span> Nueva conversación
+    </a>
+
+    <div class="conversation-section">
+      <p class="sidebar-label">CONVERSACIONES</p>
+      <nav class="conversation-list" id="conversation-list">
+        {% for item in conversations %}
+        <div class="conversation-row {% if selected and item.id == selected.id %}active{% endif %}" data-conversation="{{ item.id }}">
+          <a href="/chat?conversation={{ item.id }}">
+            <span class="conversation-icon">◇</span>
+            <span class="conversation-title">{{ item.title }}</span>
+          </a>
+          <button class="conversation-delete" data-delete="{{ item.id }}" title="Eliminar conversación" aria-label="Eliminar {{ item.title }}">×</button>
+        </div>
+        {% else %}
+        <p class="empty-list" id="empty-list">Tus chats aparecerán aquí.</p>
+        {% endfor %}
+      </nav>
+    </div>
+
+    <div class="sidebar-account">
+      <div class="usage-mini">
+        <div class="usage-mini-head">
+          <span>{% if status.mode == 'credits' %}Saldo disponible{% else %}Prueba de hoy{% endif %}</span>
+          <b id="sidebar-balance">
+            {% if status.mode == 'credits' %}{{ status.credits_left }}
+            {% else %}{{ status.messages_left }}/{{ status.daily_message_limit }}{% endif %}
+          </b>
+        </div>
+        <div class="progress-track">
+          {% if status.mode == 'credits' %}
+          <span id="sidebar-progress" style="width: {{ 100 - status.credit_used_percent }}%"></span>
+          {% else %}
+          <span id="sidebar-progress" style="width: {{ (status.messages_left / status.daily_message_limit * 100) if status.daily_message_limit else 0 }}%"></span>
+          {% endif %}
+        </div>
+        <a href="/cuenta">Ver consumo <span>→</span></a>
+      </div>
+      <div class="profile-mini">
+        <div class="profile-avatar">
+          {% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="" referrerpolicy="no-referrer" />
+          {% else %}{{ (user.name or user.email)[0]|upper }}{% endif %}
+        </div>
+        <a href="/cuenta">
+          <b>{{ user.name or user.email.split('@')[0] }}</b>
+          <span>{{ user.email }}</span>
+        </a>
+        <a class="logout-link" href="/logout" title="Cerrar sesión">↗</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <main class="chat-workspace">
+    <header class="chat-topbar">
+      <button class="icon-button menu-button" id="menu-button" aria-label="Abrir menú">☰</button>
+      <div class="chat-title">
+        <span>CHAT ACTUAL</span>
+        <h1 id="current-title">{{ selected.title if selected else 'Nueva conversación' }}</h1>
+      </div>
+      <div class="chat-tools">
+        <select id="model" aria-label="Modelo de inteligencia artificial">
+          {% for id, label in models %}
+          <option value="{{ id }}" {% if selected and selected.model == id %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <a class="balance-pill" id="usage" href="/cuenta">
+          <i></i>
+          {% if status.mode == 'credits' %}{{ status.credits_left }} créditos
+          {% else %}{{ status.messages_left }} mensajes hoy{% endif %}
+        </a>
+        {% if user.is_admin %}<a class="icon-button admin-shortcut" href="/admin" title="Administración">⚙</a>{% endif %}
+      </div>
+    </header>
+
+    <section class="thread" id="thread" aria-live="polite">
+      {% if not history %}
+      <div class="chat-empty" id="chat-empty">
+        <div class="empty-symbol"><span>✦</span></div>
+        <p class="eyebrow center-eyebrow"><span></span> NEXIA ESTÁ LISTA</p>
+        <h2>¿Qué vamos a crear hoy?</h2>
+        <p>Pregunta, analiza, escribe o desarrolla una idea. Esta conversación quedará guardada solo en tu cuenta.</p>
+        <div class="prompt-suggestions">
+          <button data-prompt="Ayúdame a organizar un plan paso a paso para mi próximo proyecto.">Organizar un proyecto <span>→</span></button>
+          <button data-prompt="Analiza esta idea de negocio y dime sus fortalezas y riesgos: ">Analizar una idea <span>→</span></button>
+          <button data-prompt="Escribe una propuesta profesional y convincente sobre: ">Redactar una propuesta <span>→</span></button>
+        </div>
+      </div>
+      {% endif %}
+
+      {% for message in history %}
+      <article class="chat-message {{ message.role }}">
+        <div class="message-avatar">
+          {% if message.role == 'assistant' %}N{% else %}{{ (user.name or user.email)[0]|upper }}{% endif %}
+        </div>
+        <div class="message-content">
+          <span class="message-author">{{ 'Nexia' if message.role == 'assistant' else 'Tú' }}</span>
+          <p>{{ message.content }}</p>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+
+    <footer class="chat-composer-wrap">
+      <div class="chat-composer">
+        <textarea id="input" rows="1" maxlength="20000" placeholder="Escribe un mensaje a Nexia..." aria-label="Mensaje"></textarea>
+        <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
+      </div>
+      <p>Nexia puede cometer errores. Verifica la información importante.</p>
+    </footer>
+  </main>
+</div>
+
+<script>
+  const csrfToken = {{ csrf_token|tojson }};
+  let conversationId = {{ (selected.id if selected else none)|tojson }};
+  let busy = false;
+
+  const thread = document.getElementById("thread");
+  const input = document.getElementById("input");
+  const sendButton = document.getElementById("send");
+  const modelSelect = document.getElementById("model");
+  const usage = document.getElementById("usage");
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+
+  function openSidebar(open) {
+    sidebar.classList.toggle("open", open);
+    backdrop.classList.toggle("open", open);
+  }
+
+  document.getElementById("menu-button").addEventListener("click", () => openSidebar(true));
+  document.getElementById("sidebar-close").addEventListener("click", () => openSidebar(false));
+  backdrop.addEventListener("click", () => openSidebar(false));
+
+  function scrollToEnd() {
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function addMessage(role, text) {
+    document.getElementById("chat-empty")?.remove();
+    const article = document.createElement("article");
+    article.className = "chat-message " + role;
+
+    const avatar = document.createElement("div");
+    avatar.className = "message-avatar";
+    avatar.textContent = role === "assistant" ? "N" : {{ ((user.name or user.email)[0]|upper)|tojson }};
+
+    const content = document.createElement("div");
+    content.className = "message-content";
+    const author = document.createElement("span");
+    author.className = "message-author";
+    author.textContent = role === "assistant" ? "Nexia" : "Tú";
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    content.append(author, paragraph);
+    article.append(avatar, content);
+    thread.appendChild(article);
+    scrollToEnd();
+    return { article, paragraph };
+  }
+
+  function addConversationToSidebar(id, title) {
+    document.getElementById("empty-list")?.remove();
+    document.querySelectorAll(".conversation-row").forEach((row) => row.classList.remove("active"));
+    const row = document.createElement("div");
+    row.className = "conversation-row active";
+    row.dataset.conversation = id;
+    const link = document.createElement("a");
+    link.href = "/chat?conversation=" + id;
+    const icon = document.createElement("span");
+    icon.className = "conversation-icon";
+    icon.textContent = "◇";
+    const label = document.createElement("span");
+    label.className = "conversation-title";
+    label.textContent = title;
+    link.append(icon, label);
+    const remove = document.createElement("button");
+    remove.className = "conversation-delete";
+    remove.dataset.delete = id;
+    remove.title = "Eliminar conversación";
+    remove.textContent = "×";
+    row.append(link, remove);
+    document.getElementById("conversation-list").prepend(row);
+    bindDelete(remove);
+  }
+
+  async function refreshUsage() {
+    const response = await fetch("/api/status");
+    if (!response.ok) return;
+    const status = await response.json();
+    if (status.mode === "credits") {
+      usage.innerHTML = "<i></i>" + status.credits_left + " créditos";
+      document.getElementById("sidebar-balance").textContent = status.credits_left;
+      document.getElementById("sidebar-progress").style.width = (100 - status.credit_used_percent) + "%";
+    } else {
+      usage.innerHTML = "<i></i>" + status.messages_left + " mensajes hoy";
+      document.getElementById("sidebar-balance").textContent = status.messages_left + "/" + status.daily_message_limit;
+      document.getElementById("sidebar-progress").style.width =
+        (status.daily_message_limit ? status.messages_left / status.daily_message_limit * 100 : 0) + "%";
+    }
+  }
+
+  async function send() {
+    const message = input.value.trim();
+    if (!message || busy) return;
+    busy = true;
+    sendButton.disabled = true;
+    input.value = "";
+    input.style.height = "auto";
+    addMessage("user", message);
+    const target = addMessage("assistant", "Pensando…");
+    target.article.classList.add("loading");
+    let answer = "";
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          model: modelSelect.value,
+          message,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        const error = await response.json().catch(() => ({}));
+        target.paragraph.textContent = error.error || "No se pudo enviar el mensaje.";
+        target.article.classList.add("error-message");
+        return;
+      }
+
+      const returnedId = Number(response.headers.get("X-Conversation-Id"));
+      const isNew = response.headers.get("X-New-Conversation") === "1";
+      if (returnedId && (!conversationId || isNew)) {
+        conversationId = returnedId;
+        const title = message.replace(/\s+/g, " ").slice(0, 58);
+        history.replaceState({}, "", "/chat?conversation=" + returnedId);
+        document.getElementById("current-title").textContent = title;
+        addConversationToSidebar(returnedId, title);
+      }
+
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let chunk;
+          try { chunk = JSON.parse(payload); } catch (_) { continue; }
+          if (chunk.error) {
+            target.paragraph.textContent = chunk.error;
+            target.article.classList.add("error-message");
+            return;
+          }
+          answer += chunk.delta || "";
+          target.article.classList.remove("loading");
+          target.paragraph.textContent = answer;
+          scrollToEnd();
+        }
+      }
+      if (!answer) {
+        target.paragraph.textContent = "El proveedor no devolvió una respuesta.";
+        target.article.classList.add("error-message");
+      }
+    } catch (_) {
+      target.paragraph.textContent = "Se perdió la conexión con el servidor.";
+      target.article.classList.add("error-message");
+    } finally {
+      target.article.classList.remove("loading");
+      busy = false;
+      sendButton.disabled = false;
+      refreshUsage();
+      input.focus();
+    }
+  }
+
+  function bindDelete(button) {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.delete);
+      if (!confirm("¿Eliminar esta conversación y todos sus mensajes?")) return;
+      const response = await fetch("/api/conversations/" + id, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      if (!response.ok) return;
+      if (conversationId === id) {
+        location.href = "/chat?new=1";
+      } else {
+        button.closest(".conversation-row")?.remove();
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-delete]").forEach(bindDelete);
+  document.querySelectorAll("[data-prompt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      input.value = button.dataset.prompt;
+      input.focus();
+      input.dispatchEvent(new Event("input"));
+    });
+  });
+  sendButton.addEventListener("click", send);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      send();
+    }
+  });
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 180) + "px";
+  });
+  scrollToEnd();
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block body_class %}landing-page{% endblock %}
+{% block body %}
+<header class="site-nav shell">
+  <a class="brand" href="/" aria-label="Nexia AI, inicio">
+    <span class="brand-mark">N</span>
+    <span>Nexia <b>AI</b></span>
+  </a>
+  <nav>
+    <a class="nav-link" href="#funciones">Funciones</a>
+    {% if user %}
+      <a class="nav-link" href="/cuenta">Mi cuenta</a>
+      <a class="btn btn-primary btn-sm" href="/chat">Abrir Nexia</a>
+    {% else %}
+      <a class="nav-link" href="/auth">Iniciar sesión</a>
+      <a class="btn btn-primary btn-sm" href="/auth?mode=signup">Crear cuenta</a>
+    {% endif %}
+  </nav>
+</header>
+
+<main>
+  <section class="hero shell">
+    <div class="hero-copy">
+      <div class="eyebrow"><span></span> Inteligencia que trabaja contigo</div>
+      <h1>Una IA potente.<br /><em>Un consumo claro.</em></h1>
+      <p class="hero-lead">
+        Conversa con los mejores modelos, organiza cada idea en su propio chat
+        y conoce tus créditos disponibles en todo momento.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary btn-lg" href="{% if user %}/chat{% else %}/auth?mode=signup{% endif %}">
+          Probar Nexia
+          <span aria-hidden="true">→</span>
+        </a>
+        <a class="btn btn-quiet btn-lg" href="#funciones">Ver cómo funciona</a>
+      </div>
+      <div class="hero-trust">
+        <div class="trust-stack"><span>A</span><span>M</span><span>L</span></div>
+        <p><strong>Cuentas privadas</strong><br />Historial y consumo por cliente</p>
+      </div>
+    </div>
+
+    <div class="product-preview" aria-label="Vista previa del producto">
+      <div class="preview-glow"></div>
+      <div class="preview-window">
+        <aside class="preview-sidebar">
+          <div class="preview-logo">N</div>
+          <div class="preview-new">＋ <span>Nuevo chat</span></div>
+          <div class="preview-label">RECIENTES</div>
+          <div class="preview-chat active"><i></i><span>Estrategia de lanzamiento</span></div>
+          <div class="preview-chat"><i></i><span>Ideas para contenido</span></div>
+          <div class="preview-chat"><i></i><span>Análisis de propuesta</span></div>
+        </aside>
+        <div class="preview-main">
+          <div class="preview-top">
+            <span>Claude Sonnet 4.6⌄</span>
+            <span class="preview-credit"><i></i> 842 créditos</span>
+          </div>
+          <div class="preview-thread">
+            <div class="mini-message user">Ayúdame a mejorar el lanzamiento de mi producto.</div>
+            <div class="mini-message bot">
+              <span class="mini-avatar">N</span>
+              <div>
+                <b>Claro. Empecemos por una estrategia en tres etapas:</b>
+                <p>1. Validación del mensaje y la audiencia.</p>
+                <p>2. Lanzamiento privado con clientes iniciales.</p>
+                <p>3. Campaña pública basada en resultados reales.</p>
+              </div>
+            </div>
+          </div>
+          <div class="preview-composer"><span>Escribe un mensaje...</span><b>↑</b></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="value-strip">
+    <div class="shell value-grid">
+      <div><span>01</span><b>Chats organizados</b><p>Una conversación independiente para cada proyecto.</p></div>
+      <div><span>02</span><b>Saldo transparente</b><p>Créditos asignados, usados y disponibles a la vista.</p></div>
+      <div><span>03</span><b>Acceso seguro</b><p>Correo, contraseña o tu cuenta de Google.</p></div>
+    </div>
+  </section>
+
+  <section class="features shell" id="funciones">
+    <div class="section-heading">
+      <div class="eyebrow"><span></span> Todo en un lugar</div>
+      <h2>Creado para conversar.<br /><em>Diseñado para crecer.</em></h2>
+    </div>
+    <div class="feature-grid">
+      <article class="feature-card featured">
+        <div class="feature-icon">✦</div>
+        <h3>Modelos de alto nivel</h3>
+        <p>Elige entre Sonnet, Haiku y Opus según la velocidad y profundidad que necesites.</p>
+        <div class="model-pills"><span>Sonnet 5</span><span>Opus 5</span><span>Haiku 4.5</span></div>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">◎</div>
+        <h3>Historial que sí sirve</h3>
+        <p>Crea, retoma y elimina conversaciones sin mezclar contextos entre proyectos.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">◔</div>
+        <h3>Consumo sin sorpresas</h3>
+        <p>Consulta el detalle de tus solicitudes y el saldo actualizado después de cada respuesta.</p>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer shell">
+  <a class="brand" href="/"><span class="brand-mark">N</span><span>Nexia <b>AI</b></span></a>
+  <p>Inteligencia clara para hacer más.</p>
+  <p>© 2026 Nexia AI</p>
+</footer>
+{% endblock %}

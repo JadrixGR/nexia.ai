@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Administración · Nexia AI{% endblock %}
+{% block body_class %}dashboard-page admin-page{% endblock %}
+{% block body %}
+<header class="dashboard-nav">
+  <a class="brand brand-light" href="/">
+    <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
+  </a>
+  <nav>
+    <a href="/chat">Chats</a>
+    <a href="/cuenta">Mi cuenta</a>
+    <a href="/logout">Salir</a>
+  </nav>
+</header>
+
+<main class="dashboard-shell admin-shell">
+  <div class="dashboard-heading">
+    <div>
+      <p class="dashboard-kicker">ADMINISTRACIÓN</p>
+      <h1>Clientes y configuración</h1>
+      <p>Activa cuentas, asigna créditos y controla el proveedor desde un solo lugar.</p>
+    </div>
+    <a class="btn btn-primary" href="/chat">Abrir chat <span>→</span></a>
+  </div>
+
+  {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+  {% if success %}<div class="alert alert-success" role="status">{{ success }}</div>{% endif %}
+
+  <section class="admin-settings activity-card">
+    <div class="activity-head">
+      <div><p class="dashboard-kicker">PROVEEDOR</p><h2>Configuración global</h2></div>
+      <a href="https://api.mwapi.dev/reseller" target="_blank" rel="noreferrer">Consultar saldo externo ↗</a>
+    </div>
+    <form method="post" action="/admin/settings" class="settings-grid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="form-field span-2">
+        <label for="trial">Clave API para la prueba gratuita</label>
+        <input id="trial" name="trial_api_key" type="password" autocomplete="off"
+          placeholder="{% if settings.trial_api_key %}Clave cifrada y configurada{% else %}sk-...{% endif %}" />
+        <small>Se guarda cifrada y nunca se muestra al navegador.</small>
+      </div>
+      <div class="form-field">
+        <label for="limit">Mensajes gratuitos por día</label>
+        <input id="limit" name="daily_message_limit" type="number" min="0" value="{{ settings.daily_message_limit }}" required />
+      </div>
+      <div class="form-field">
+        <label for="default-model">Modelo predeterminado</label>
+        <select id="default-model" name="default_model">
+          {% for id, label in models %}<option value="{{ id }}" {% if settings.default_model == id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field span-2">
+        <label for="base">URL base de la API</label>
+        <input id="base" name="api_base_url" type="url" value="{{ settings.api_base_url }}" required />
+      </div>
+      <div class="settings-action">
+        <button class="btn btn-primary btn-full" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="clients-heading">
+    <div><p class="dashboard-kicker">CUENTAS</p><h2>Clientes <span>{{ rows|length }}</span></h2></div>
+    <p>Los créditos mostrados son el saldo interno de Nexia.</p>
+  </div>
+
+  <section class="client-list">
+    {% for row in rows %}
+    <article class="client-card">
+      <div class="client-summary">
+        <div class="client-avatar">{{ (row.user.name or row.user.email)[0]|upper }}</div>
+        <div class="client-identity">
+          <div>
+            <h3>{{ row.user.name or row.user.email.split('@')[0] }}</h3>
+            {% if row.user.is_admin %}<span class="status-tag admin">Admin</span>{% endif %}
+            <span class="status-tag {{ 'active' if row.status.is_active else 'trial' }}">
+              {{ 'Activo' if row.status.is_active else 'Prueba' }}
+            </span>
+          </div>
+          <p>{{ row.user.email }}</p>
+        </div>
+        <div class="client-metrics">
+          <div><span>Disponibles</span><b>{{ row.status.credits_left }}</b></div>
+          <div><span>Usados</span><b>{{ row.status.credits_used }}</b></div>
+          <div><span>Hoy</span><b>{{ row.status.messages_today }}</b></div>
+        </div>
+      </div>
+
+      <form method="post" action="/admin/client/{{ row.user.id }}" class="client-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-field api-key-field">
+          <label for="key-{{ row.user.id }}">Clave API del cliente</label>
+          <input id="key-{{ row.user.id }}" name="api_key" type="password" autocomplete="off"
+            placeholder="{% if row.status.has_api_key %}Clave cifrada y configurada{% else %}sk-...{% endif %}" />
+        </div>
+        <div class="form-field credits-field">
+          <label for="credits-{{ row.user.id }}">Añadir créditos</label>
+          <input id="credits-{{ row.user.id }}" name="add_credits" type="number" min="0" value="0" />
+        </div>
+        <div class="form-field notes-field">
+          <label for="notes-{{ row.user.id }}">Nota interna</label>
+          <input id="notes-{{ row.user.id }}" name="notes" value="{{ row.user.notes or '' }}" placeholder="Plan, pago o referencia..." />
+        </div>
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+      </form>
+
+      <div class="client-actions">
+        <form method="post" action="/admin/client/{{ row.user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="toggle_active" />
+          <button type="submit">{{ 'Pausar cuenta' if row.status.is_active else 'Activar cuenta' }}</button>
+        </form>
+        {% if row.status.has_api_key %}
+        <form method="post" action="/admin/client/{{ row.user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="remove_key" />
+          <button type="submit">Quitar clave</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/admin/client/{{ row.user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="toggle_admin" />
+          <button type="submit">{{ 'Quitar admin' if row.user.is_admin else 'Hacer admin' }}</button>
+        </form>
+        {% if row.user.id != user.id %}
+        <form method="post" action="/admin/client/{{ row.user.id }}" onsubmit="return confirm('¿Eliminar definitivamente esta cuenta y todos sus chats?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="delete" />
+          <button class="danger-action" type="submit">Eliminar</button>
+        </form>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+</main>
+{% endblock %}

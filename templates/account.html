@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Mi cuenta y consumo · Nexia AI{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block body %}
+<header class="dashboard-nav">
+  <a class="brand brand-light" href="/">
+    <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
+  </a>
+  <nav>
+    <a href="/chat">Chats</a>
+    {% if user.is_admin %}<a href="/admin">Administración</a>{% endif %}
+    <a href="/logout">Salir</a>
+  </nav>
+</header>
+
+<main class="dashboard-shell">
+  <div class="dashboard-heading">
+    <div>
+      <p class="dashboard-kicker">MI CUENTA</p>
+      <h1>Consumo y créditos</h1>
+      <p>Tu actividad de Nexia, clara y actualizada.</p>
+    </div>
+    <a class="btn btn-primary" href="/chat">Volver al chat <span>→</span></a>
+  </div>
+
+  {% if status.mode == 'credits' %}
+  <section class="balance-hero">
+    <div>
+      <p>CRÉDITOS DISPONIBLES</p>
+      <strong>{{ status.credits_left }}</strong>
+      <span>de {{ status.credits }} asignados</span>
+    </div>
+    <div class="balance-chart" style="--used: {{ status.credit_used_percent }}%">
+      <div><b>{{ 100 - status.credit_used_percent }}%</b><span>disponible</span></div>
+    </div>
+  </section>
+  {% else %}
+  <section class="balance-hero trial">
+    <div>
+      <p>PRUEBA GRATUITA DE HOY</p>
+      <strong>{{ status.messages_left }}</strong>
+      <span>mensajes disponibles de {{ status.daily_message_limit }}</span>
+    </div>
+    <div class="trial-status">
+      <span>Cuenta pendiente de activación</span>
+      <p>Cuando el administrador asigne tu clave y créditos, aquí verás tu saldo completo.</p>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="metric-grid">
+    <article>
+      <span class="metric-icon">↗</span>
+      <p>Créditos usados</p>
+      <strong>{{ status.credits_used }}</strong>
+      <small>Cada respuesta consume 1 crédito</small>
+    </article>
+    <article>
+      <span class="metric-icon">◇</span>
+      <p>Conversaciones</p>
+      <strong>{{ conversation_count }}</strong>
+      <small>Chats guardados en tu cuenta</small>
+    </article>
+    <article>
+      <span class="metric-icon">◷</span>
+      <p>Solicitudes hoy</p>
+      <strong>{{ status.messages_today }}</strong>
+      <small>Incluye prueba y plan de créditos</small>
+    </article>
+  </section>
+
+  <section class="activity-card">
+    <div class="activity-head">
+      <div><p class="dashboard-kicker">ACTIVIDAD</p><h2>Consumo reciente</h2></div>
+      <span>Últimas 30 solicitudes</span>
+    </div>
+    <div class="activity-table-wrap">
+      <table class="activity-table">
+        <thead><tr><th>Fecha</th><th>Modelo</th><th>Modalidad</th><th>Consumo</th></tr></thead>
+        <tbody>
+          {% for event in events %}
+          <tr>
+            <td>{{ event.created_at.strftime('%d/%m/%Y · %H:%M') if event.created_at else '—' }}</td>
+            <td><span class="model-dot"></span>{{ event.model }}</td>
+            <td><span class="status-tag {{ event.mode }}">{{ 'Créditos' if event.mode == 'credits' else 'Prueba' }}</span></td>
+            <td>{{ '1 crédito' if event.mode == 'credits' else 'Incluido' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="table-empty">Todavía no hay consumo registrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="account-details">
+    <div><p>Correo</p><strong>{{ user.email }}</strong></div>
+    <div><p>Acceso</p><strong>{{ 'Google y contraseña' if user.auth_provider == 'local+google' else ('Google' if user.auth_provider == 'google' else 'Correo y contraseña') }}</strong></div>
+    <div><p>Estado de API</p><strong>{{ 'Activa' if status.is_active else 'Pendiente' }}</strong></div>
+  </section>
+</main>
+{% endblock %}
