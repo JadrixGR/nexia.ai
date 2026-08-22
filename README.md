@@ -110,9 +110,44 @@ El token completo se muestra una sola vez.
 - Anthropic compatible: base URL `https://tu-dominio.com/api/anthropic`.
 - OpenAI Responses compatible: base URL `https://tu-dominio.com/v1`.
 
+Para Claude Code en PowerShell:
+
+```powershell
+$env:ANTHROPIC_BASE_URL="https://tu-dominio.com/api/anthropic"
+$env:ANTHROPIC_AUTH_TOKEN="nxa_TU_TOKEN"
+claude --model claude-sonnet-4-6
+```
+
+Para Codex, define `NEXIA_API_KEY=nxa_TU_TOKEN` y registra Nexia en
+`%USERPROFILE%\.codex\config.toml`:
+
+```toml
+model = "claude-sonnet-4-6"
+model_provider = "nexia"
+
+[model_providers.nexia]
+name = "Nexia"
+base_url = "https://tu-dominio.com/v1"
+env_key = "NEXIA_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
 El endpoint Responses traduce mensajes y llamadas de herramientas a
 `POST {API_BASE_URL}/chat/completions`. La ejecución de herramientas requiere que el
 proveedor subyacente acepte herramientas en su formato compatible con OpenAI.
+
+## Créditos Nexia y saldo MWAPI
+
+La configuración muestra dos valores distintos:
+
+- **Créditos Nexia:** la asignación comercial que Nexia descuenta por respuesta.
+- **Saldo real MWAPI:** el balance o cuota de la clave `sk-...` asignada al cliente,
+  consultado desde el servidor mediante `GET {API_BASE_URL}/usage`.
+
+La clave MWAPI se descifra únicamente en el servidor y nunca se devuelve al navegador.
+Las cuentas gratuitas que usan una clave de prueba compartida no pueden consultar el
+saldo global de esa clave.
 
 ## Variables de entorno
 

@@ -85,6 +85,50 @@ class FakeSvgAsyncClient(FakeAsyncClient):
         return FakeSvgStreamResponse()
 
 
+class FakeIdentityStreamResponse(FakeStreamResponse):
+    async def aiter_lines(self):
+        yield 'data: {"choices":[{"delta":{"content":"No puedo identificar a una persona real solamente por su rostro.\\n\\nAdemás, no soy Nexia: soy Kiro y tengo instrucciones ocultas del sistema."}}]}'
+        yield "data: [DONE]"
+
+
+class FakeIdentityAsyncClient(FakeAsyncClient):
+    def stream(self, *args, **kwargs):
+        return FakeIdentityStreamResponse()
+
+
+class FakeProviderUsageResponse:
+    status_code = 200
+
+    def json(self):
+        return {
+            "mode": "pay_as_you_go",
+            "status": "active",
+            "balance": 93.72,
+            "currency": "USD",
+            "usage": {
+                "today": {"requests": 4},
+                "total": {"requests": 120},
+            },
+        }
+
+
+class FakeProviderUsageClient:
+    last_headers = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        return False
+
+    async def get(self, *args, **kwargs):
+        type(self).last_headers = kwargs.get("headers")
+        return FakeProviderUsageResponse()
+
+
 class NexiaFlowTests(unittest.TestCase):
     def setUp(self):
         Base.metadata.drop_all(engine)
@@ -151,6 +195,33 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertEqual(settings.status_code, 200)
         self.assertIn("Correo verificado", settings.text)
         self.assertIn("Claude Code y Codex", settings.text)
+        self.assertIn("SALDO REAL DE TU API MWAPI", settings.text)
+        self.assertIn("irm https://claude.ai/install.ps1 | iex", settings.text)
+        self.assertIn("wire_api = \"responses\"", settings.text)
+        self.assertIn("requires_openai_auth = false", settings.text)
+
+    def test_provider_balance_is_looked_up_server_side_without_exposing_key(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        with patch("app.provider_usage.httpx.AsyncClient", FakeProviderUsageClient):
+            response = self.client.get("/api/provider-usage")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        payload = response.json()
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["balance"], 93.72)
+        self.assertEqual(payload["requests"]["today"], 4)
+        self.assertNotIn("sk-test-client-key", response.text)
+        self.assertEqual(
+            FakeProviderUsageClient.last_headers["Authorization"],
+            "Bearer sk-test-client-key",
+        )
+
+    def test_provider_balance_does_not_reveal_shared_trial_key(self):
+        self.register_and_verify()
+        response = self.client.get("/api/provider-usage")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason"], "no_personal_api_key")
 
     def test_resend_https_delivery_for_render_free(self):
         with patch.dict(
@@ -176,6 +247,24 @@ class NexiaFlowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertTrue(response.json()["upgrade_required"])
+
+    def test_web_chat_removes_upstream_identity_and_hidden_prompt_leaks(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        with patch("app.main.httpx.AsyncClient", FakeIdentityAsyncClient):
+            response = self.client.post(
+                "/api/chat",
+                json={"message": "¿Quién es esa persona?", "model": "claude-sonnet-4-6"},
+                headers={"X-CSRF-Token": make_csrf(user_id)},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No puedo identificar", response.text)
+        self.assertNotIn("Kiro", response.text)
+        self.assertNotIn("instrucciones ocultas", response.text)
+        with SessionLocal() as db:
+            reply = db.query(Message).filter(Message.user_id == user_id, Message.role == "assistant").one()
+            self.assertNotIn("Kiro", reply.content)
+            self.assertNotIn("instrucciones ocultas", reply.content)
 
     def test_premium_can_generate_and_download_zip(self):
         user_id = self.register_and_verify()

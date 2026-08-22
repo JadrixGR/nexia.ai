@@ -69,9 +69,25 @@
     <section class="settings-section" id="consumo">
       <div class="section-title"><div><span>03</span><h2>Consumo</h2></div><p>Actividad reciente</p></div>
       <div class="metric-grid settings-metrics">
-        <article><p>Créditos usados</p><strong>{{ status.credits_used }}</strong><small>1 crédito por respuesta</small></article>
+        <article><p>Créditos Nexia usados</p><strong>{{ status.credits_used }}</strong><small>1 crédito por respuesta</small></article>
         <article><p>Conversaciones</p><strong>{{ conversation_count }}</strong><small>Chats guardados</small></article>
         <article><p>Archivos creados</p><strong>{{ artifact_count }}</strong><small>ZIP, PDF, Excel, Word y HTML</small></article>
+      </div>
+      <div class="settings-card provider-balance-card" id="provider-balance" data-enabled="{{ 'true' if status.is_active and status.has_api_key else 'false' }}">
+        <div class="provider-balance-main">
+          <span class="provider-kicker">SALDO REAL DE TU API MWAPI</span>
+          <strong id="provider-balance-value">—</strong>
+          <p id="provider-balance-detail">Consultando el saldo asociado a tu clave…</p>
+        </div>
+        <div class="provider-balance-stats">
+          <div><span>Solicitudes hoy</span><b id="provider-requests-today">—</b></div>
+          <div><span>Solicitudes totales</span><b id="provider-requests-total">—</b></div>
+          <div><span>Modalidad</span><b id="provider-mode">—</b></div>
+        </div>
+        <div class="provider-balance-actions">
+          <button class="btn btn-quiet" id="refresh-provider-balance" type="button">Actualizar saldo</button>
+          <a href="https://api.mwapi.dev/reseller" target="_blank" rel="noreferrer">Comprobar en MWAPI ↗</a>
+        </div>
       </div>
       <div class="settings-card activity-card">
         <div class="activity-head"><h3>Últimas solicitudes</h3><span>Hasta 30 registros</span></div>
@@ -99,27 +115,120 @@
       <div class="integration-grid">
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Formato Anthropic compatible</p></div></div>
-          <p>En PowerShell, configura estas variables antes de abrir Claude Code:</p>
-          <pre><code>$env:ANTHROPIC_BASE_URL="{{ public_base_url }}/api/anthropic"
+          <ol class="setup-steps">
+            <li><b>Genera tu token Nexia</b><span>Usa el botón superior. El token empieza con <code>nxa_</code>.</span></li>
+            <li><b>Instala Claude Code en PowerShell</b><span>Ejecuta el instalador oficial:</span></li>
+          </ol>
+          <div class="code-copy"><button type="button" data-copy-target="claude-install">Copiar</button><pre><code id="claude-install">irm https://claude.ai/install.ps1 | iex</code></pre></div>
+          <ol class="setup-steps" start="3">
+            <li><b>Conecta Claude Code con Nexia</b><span>En la carpeta de tu proyecto, abre PowerShell y ejecuta:</span></li>
+          </ol>
+          <div class="code-copy"><button type="button" data-copy-target="claude-session">Copiar</button><pre><code id="claude-session">$env:ANTHROPIC_BASE_URL="{{ public_base_url }}/api/anthropic"
 $env:ANTHROPIC_AUTH_TOKEN="TU_TOKEN_NEXIA"
 claude --model claude-sonnet-4-6</code></pre>
-          <small>Las herramientas dependen de que el proveedor compatible las procese correctamente.</small>
+          </div>
+          <details class="persistent-config"><summary>Guardar la conexión de forma permanente</summary><p>Crea o edita <code>%USERPROFILE%\.claude\settings.json</code>:</p><div class="code-copy"><button type="button" data-copy-target="claude-settings">Copiar</button><pre><code id="claude-settings">{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{ public_base_url }}/api/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "TU_TOKEN_NEXIA"
+  }
+}</code></pre></div></details>
+          <ol class="setup-steps" start="4"><li><b>Verifica la conexión</b><span>Dentro de Claude Code escribe <code>/status</code>. Debe mostrar la URL de Nexia. Después ya puedes pedirle que lea, cree o modifique archivos del proyecto.</span></li></ol>
+          <small>El consumo hecho desde la terminal descuenta los mismos créditos Nexia. Las llamadas de herramientas requieren compatibilidad del modelo proveedor.</small>
         </article>
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CX</span><div><h3>ChatGPT Codex</h3><p>Protocolo Responses compatible</p></div></div>
-          <p>Añade esto a <code>~/.codex/config.toml</code>:</p>
-          <pre><code>model = "claude-sonnet-4-6"
+          <ol class="setup-steps">
+            <li><b>Instala Codex CLI</b><span>Necesitas Node.js y npm:</span></li>
+          </ol>
+          <div class="code-copy"><button type="button" data-copy-target="codex-install">Copiar</button><pre><code id="codex-install">npm install -g @openai/codex</code></pre></div>
+          <ol class="setup-steps" start="2">
+            <li><b>Configura el proveedor Nexia</b><span>Crea o edita <code>%USERPROFILE%\.codex\config.toml</code>:</span></li>
+          </ol>
+          <div class="code-copy"><button type="button" data-copy-target="codex-config">Copiar</button><pre><code id="codex-config">model = "claude-sonnet-4-6"
 model_provider = "nexia"
 
 [model_providers.nexia]
 name = "Nexia"
 base_url = "{{ public_base_url }}/v1"
 env_key = "NEXIA_API_KEY"
-wire_api = "responses"</code></pre>
-          <p>Después define <code>$env:NEXIA_API_KEY="TU_TOKEN_NEXIA"</code>.</p>
+wire_api = "responses"
+requires_openai_auth = false</code></pre></div>
+          <ol class="setup-steps" start="3">
+            <li><b>Abre tu proyecto con el token</b><span>En PowerShell ejecuta:</span></li>
+          </ol>
+          <div class="code-copy"><button type="button" data-copy-target="codex-session">Copiar</button><pre><code id="codex-session">$env:NEXIA_API_KEY="TU_TOKEN_NEXIA"
+cd "C:\ruta\de\tu\proyecto"
+codex</code></pre></div>
+          <ol class="setup-steps" start="4"><li><b>Comprueba y trabaja</b><span>Ejecuta <code>/status</code> y confirma el proveedor <code>nexia</code>. Codex podrá trabajar con los archivos y la terminal de esa carpeta.</span></li></ol>
+          <small>No compartas el token ni lo guardes en GitHub, capturas o archivos del proyecto.</small>
         </article>
       </div>
     </section>
   </div>
 </main>
+<script>
+  (() => {
+    document.querySelectorAll("[data-copy-target]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const target = document.getElementById(button.dataset.copyTarget);
+        if (!target) return;
+        await navigator.clipboard.writeText(target.textContent.trim());
+        const previous = button.textContent;
+        button.textContent = "Copiado";
+        setTimeout(() => { button.textContent = previous; }, 1400);
+      });
+    });
+
+    const card = document.getElementById("provider-balance");
+    if (!card) return;
+    const value = document.getElementById("provider-balance-value");
+    const detail = document.getElementById("provider-balance-detail");
+    const today = document.getElementById("provider-requests-today");
+    const total = document.getElementById("provider-requests-total");
+    const mode = document.getElementById("provider-mode");
+    const refresh = document.getElementById("refresh-provider-balance");
+    const formatNumber = (number) => new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(number);
+
+    const loadProviderBalance = async () => {
+      if (card.dataset.enabled !== "true") {
+        value.textContent = "No asignado";
+        detail.textContent = "Tu cuenta todavía no tiene una clave MWAPI personal activa. El administrador debe asignarla.";
+        refresh.disabled = true;
+        return;
+      }
+      refresh.disabled = true;
+      refresh.textContent = "Consultando…";
+      detail.textContent = "Consultando MWAPI de forma segura…";
+      try {
+        const response = await fetch("/api/provider-usage", { headers: { "Accept": "application/json" }, cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || !data.available) throw new Error(data.reason || "unavailable");
+        if (data.balance !== null && data.balance !== undefined) {
+          value.textContent = `${data.currency === "USD" ? "$" : `${data.currency} `}${formatNumber(data.balance)}`;
+          detail.textContent = "Saldo monetario informado para tu clave MWAPI.";
+        } else if (data.quota && data.quota.remaining !== null && data.quota.remaining !== undefined) {
+          value.textContent = formatNumber(data.quota.remaining);
+          detail.textContent = data.quota.limit !== null && data.quota.limit !== undefined
+            ? `${formatNumber(data.quota.remaining)} de ${formatNumber(data.quota.limit)} unidades disponibles.`
+            : "Cuota restante informada por MWAPI.";
+        } else {
+          value.textContent = "Activa";
+          detail.textContent = "La clave es válida, pero MWAPI no informó un saldo numérico.";
+        }
+        today.textContent = data.requests?.today ?? "—";
+        total.textContent = data.requests?.total ?? "—";
+        mode.textContent = (data.mode || "Activa").replaceAll("_", " ");
+      } catch (_error) {
+        value.textContent = "No disponible";
+        detail.textContent = "MWAPI no permitió consultar el saldo en este momento. Tu clave nunca se mostró en el navegador.";
+      } finally {
+        refresh.disabled = false;
+        refresh.textContent = "Actualizar saldo";
+      }
+    };
+    refresh.addEventListener("click", loadProviderBalance);
+    loadProviderBalance();
+  })();
+</script>
 {% endblock %}
