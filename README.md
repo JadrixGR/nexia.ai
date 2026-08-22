@@ -116,12 +116,20 @@ $claudeDir = "$env:USERPROFILE\.local\bin"
 $env:Path = "$env:Path;$claudeDir"
 $env:ANTHROPIC_BASE_URL="https://tu-dominio.com/api/anthropic"
 $env:ANTHROPIC_AUTH_TOKEN="nxa_TU_TOKEN"
+$headers = @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" }
+Invoke-RestMethod "https://tu-dominio.com/v1/models" -Headers $headers
 claude --model claude-sonnet-4-6
 ```
 
 Si PowerShell indica que `claude` no se reconoce, comprueba
 `Test-Path "$env:USERPROFILE\.local\bin\claude.exe"`, añade esa carpeta al `PATH`
 del usuario o instala la alternativa oficial con `winget install Anthropic.ClaudeCode`.
+
+El cliente utiliza el token `nxa_...`, mientras que Nexia conserva y utiliza la clave
+MWAPI `sk-...` asignada por el administrador. Un error del proveedor como
+`API key does not exist` significa que la clave `sk-...` debe reemplazarse; no se corrige
+generando otro token `nxa_...`. Las instrucciones de Configuración utilizan el dominio
+actual de la página para evitar hostnames antiguos de Render.
 
 Para Codex, define `NEXIA_API_KEY=nxa_TU_TOKEN` y registra Nexia en
 `%USERPROFILE%\.codex\config.toml`:

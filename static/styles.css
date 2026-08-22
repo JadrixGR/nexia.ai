@@ -1169,6 +1169,10 @@ html[data-theme="dark"] .chat-message.user .message-avatar { background: #3a3732
 .integration-warning b { font-size: 9px; }
 .integration-warning span { font-size: 8px; line-height: 1.5; }
 html[data-theme="dark"] .integration-warning { color: #f2c486; background: #3b3020; border-color: #5c482a; }
+.integration-note { display: grid; gap: 2px; margin: 8px 0 3px; padding: 10px 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }
+.integration-note b { font-size: 9px; }
+.integration-note span { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.integration-note code { color: var(--violet); }
 .setup-steps { margin: 17px 0 9px; padding-left: 20px; }
 .setup-steps li { margin: 0 0 11px; padding-left: 3px; color: var(--ink); font-size: 10px; }
 .setup-steps b, .setup-steps span { display: block; }

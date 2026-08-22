@@ -99,6 +99,7 @@
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Formato Anthropic compatible</p></div></div>
           <div class="integration-warning"><b>¿Aparece “claude no se reconoce”?</b><span>Significa que Claude Code no está instalado o que falta su carpeta en el PATH. Ejecuta completo el paso 2.</span></div>
+          <div class="integration-note"><b>Hay dos claves diferentes</b><span>Tú usas el token <code>nxa_...</code>. Nexia utiliza en el servidor la clave MWAPI <code>sk-...</code> asignada por el administrador. Si aparece “API key does not exist”, el administrador debe reemplazar esa clave MWAPI.</span></div>
           <ol class="setup-steps">
             <li><b>Genera tu token Nexia</b><span>Usa el botón superior. El token empieza con <code>nxa_</code>.</span></li>
             <li><b>Instala y verifica Claude Code</b><span>Copia y ejecuta todo este bloque en PowerShell. Instala Claude Code, corrige el PATH y muestra la versión:</span></li>
@@ -118,6 +119,8 @@ claude --version</code></pre></div>
           </ol>
           <div class="code-copy"><button type="button" data-copy-target="claude-session">Copiar</button><pre><code id="claude-session">$env:ANTHROPIC_BASE_URL="{{ public_base_url }}/api/anthropic"
 $env:ANTHROPIC_AUTH_TOKEN="TU_TOKEN_NEXIA"
+$headers = @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" }
+Invoke-RestMethod "{{ public_base_url }}/v1/models" -Headers $headers
 claude --model claude-sonnet-4-6</code></pre>
           </div>
           <details class="persistent-config"><summary>Guardar la conexión de forma permanente</summary><p>Crea o edita <code>%USERPROFILE%\.claude\settings.json</code>:</p><div class="code-copy"><button type="button" data-copy-target="claude-settings">Copiar</button><pre><code id="claude-settings">{
@@ -126,7 +129,7 @@ claude --model claude-sonnet-4-6</code></pre>
     "ANTHROPIC_AUTH_TOKEN": "TU_TOKEN_NEXIA"
   }
 }</code></pre></div></details>
-          <ol class="setup-steps" start="4"><li><b>Verifica la conexión</b><span>Dentro de Claude Code escribe <code>/status</code>. Debe mostrar la URL de Nexia. Después ya puedes pedirle que lea, cree o modifique archivos del proyecto.</span></li></ol>
+          <ol class="setup-steps" start="4"><li><b>Verifica la conexión</b><span>El paso anterior debe listar los modelos de Nexia antes de abrir Claude Code. Ya dentro, escribe <code>/status</code> y confirma que la URL base corresponde al mismo dominio donde abriste Nexia.</span></li></ol>
           <small>El consumo hecho desde la terminal utiliza directamente el saldo real de la API asignada a tu cuenta. Las llamadas de herramientas requieren compatibilidad del modelo proveedor.</small>
         </article>
         <article class="settings-card integration-card">

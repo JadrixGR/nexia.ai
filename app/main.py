@@ -83,7 +83,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.3.1")
+app = FastAPI(title="Nexia", version="3.3.2")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -578,7 +578,7 @@ def account_page(request: Request, db: Session = Depends(get_db)):
             conversation_count=conversation_count,
             artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
             models=models_for_user(user),
-            public_base_url=APP_BASE_URL or str(request.base_url).rstrip("/"),
+            public_base_url=str(request.base_url).rstrip("/"),
         ),
     )
 
@@ -608,7 +608,7 @@ def rotate_client_token(
             conversation_count=db.query(Conversation).filter(Conversation.user_id == user.id).count(),
             artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
             models=models_for_user(user),
-            public_base_url=APP_BASE_URL or str(request.base_url).rstrip("/"),
+            public_base_url=str(request.base_url).rstrip("/"),
             new_client_token=raw,
         ),
     )
@@ -688,7 +688,7 @@ def admin_settings(
 
 
 @app.post("/admin/client/{user_id}")
-def admin_client(
+async def admin_client(
     user_id: int,
     request: Request,
     csrf_token: str = Form(...),
@@ -731,6 +731,16 @@ def admin_client(
         if clean_key:
             if not clean_key.startswith("sk-"):
                 return RedirectResponse("/admin?error=La+clave+API+debe+comenzar+con+sk-", 303)
+            validation = await fetch_provider_usage(get_settings(db).api_base_url, clean_key)
+            if (
+                not validation.get("available")
+                and validation.get("reason") == "provider_rejected"
+                and validation.get("provider_status") in {401, 403, 404}
+            ):
+                return RedirectResponse(
+                    "/admin?error=La+clave+MWAPI+fue+rechazada.+Verifica+que+exista+y+esté+activa",
+                    303,
+                )
             client.api_key = encrypt_api_key(clean_key)
             client.is_active = True
         if plan == "premium":
@@ -1275,6 +1285,13 @@ async def _external_completion(
     except httpx.HTTPError as exc:
         return None, f"No se pudo contactar con el proveedor: {exc}"
     if response.status_code >= 400:
+        if response.status_code in {401, 403}:
+            if access.mode == "api":
+                return None, (
+                    "La clave MWAPI asignada a tu cuenta fue rechazada por el proveedor. "
+                    "Tu token Nexia sí fue aceptado; solicita al administrador que reemplace la clave sk-..."
+                )
+            return None, "La clave compartida de la prueba gratuita fue rechazada por el proveedor."
         return None, f"El proveedor respondió {response.status_code}: {response.text[:300]}"
     try:
         return response.json(), None
@@ -1388,5 +1405,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.3.1"),
+        "version": os.environ.get("APP_VERSION", "3.3.2"),
     }

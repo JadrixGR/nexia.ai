@@ -6,7 +6,7 @@ import io
 import os
 import unittest
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ["DATABASE_URL"] = "sqlite:///./nexia-tests.db"
 os.environ["SECRET_KEY"] = "test-session-secret-with-enough-entropy"
@@ -129,6 +129,16 @@ class FakeProviderUsageClient:
         return FakeProviderUsageResponse()
 
 
+class FakeUnauthorizedResponse:
+    status_code = 401
+    text = '{"message":"API key does not exist"}'
+
+
+class FakeUnauthorizedAsyncClient(FakeAsyncClient):
+    async def post(self, *args, **kwargs):
+        return FakeUnauthorizedResponse()
+
+
 class NexiaFlowTests(unittest.TestCase):
     def setUp(self):
         Base.metadata.drop_all(engine)
@@ -191,7 +201,8 @@ class NexiaFlowTests(unittest.TestCase):
         )
         self.assertIn("no+es+correcto", wrong.headers["location"])
         self.verify(user_id, code)
-        settings = self.client.get("/configuracion")
+        with patch("app.main.APP_BASE_URL", "https://hostname-antiguo.onrender.com"):
+            settings = self.client.get("/configuracion")
         self.assertEqual(settings.status_code, 200)
         self.assertIn("Correo verificado", settings.text)
         self.assertIn("Claude Code y Codex", settings.text)
@@ -203,6 +214,8 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertIn("claude --version", settings.text)
         self.assertIn("winget install Anthropic.ClaudeCode", settings.text)
         self.assertIn("claude no se reconoce", settings.text)
+        self.assertIn('Invoke-RestMethod "http://testserver/v1/models"', settings.text)
+        self.assertNotIn("hostname-antiguo.onrender.com", settings.text)
         self.assertIn("wire_api = \"responses\"", settings.text)
         self.assertIn("requires_openai_auth = false", settings.text)
 
@@ -228,6 +241,38 @@ class NexiaFlowTests(unittest.TestCase):
         response = self.client.get("/api/provider-usage")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["reason"], "no_personal_api_key")
+
+    def test_admin_rejects_invalid_provider_key_before_assigning_it(self):
+        user_id = self.register_and_verify()
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            user.is_admin = True
+            db.commit()
+        with patch(
+            "app.main.fetch_provider_usage",
+            new=AsyncMock(
+                return_value={
+                    "available": False,
+                    "reason": "provider_rejected",
+                    "provider_status": 401,
+                }
+            ),
+        ):
+            response = self.client.post(
+                f"/admin/client/{user_id}",
+                data={
+                    "csrf_token": make_csrf(user_id),
+                    "api_key": "sk-invalid-provider-key",
+                    "plan": "free",
+                    "premium_days": 0,
+                    "notes": "",
+                },
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("clave+MWAPI+fue+rechazada", response.headers["location"])
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(User, user_id).api_key)
 
     def test_resend_https_delivery_for_render_free(self):
         with patch.dict(
@@ -473,6 +518,31 @@ Para descargarlo, copia este contenido."""
                 db.query(UsageEvent).filter(UsageEvent.user_id == user_id, UsageEvent.mode == "api").count(),
                 2,
             )
+
+    def test_claude_code_distinguishes_valid_nexia_token_from_rejected_provider_key(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        raw, digest, prefix = generate_client_token()
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            user.client_token_hash = digest
+            user.client_token_prefix = prefix
+            db.commit()
+        with patch("app.main.httpx.AsyncClient", FakeUnauthorizedAsyncClient):
+            response = self.client.post(
+                "/api/anthropic/v1/messages",
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 100,
+                    "messages": [{"role": "user", "content": "Hola"}],
+                },
+                headers={"Authorization": f"Bearer {raw}"},
+            )
+        self.assertEqual(response.status_code, 502)
+        detail = response.json()["detail"]
+        self.assertIn("clave MWAPI", detail)
+        self.assertIn("token Nexia sí fue aceptado", detail)
+        self.assertNotIn("API key does not exist", detail)
 
     def test_active_account_status_and_chat_only_reference_real_api_balance(self):
         user_id = self.register_and_verify()
