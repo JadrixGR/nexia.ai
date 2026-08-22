@@ -12,6 +12,10 @@ desde Claude Code o ChatGPT Codex mediante un token personal.
 - Plan Premium: todos los modelos documentados, con vencimiento configurable por días.
 - Selector de modelo en el compositor, tema claro/oscuro y diseño cálido tipo Claude.
 - Conversaciones independientes, historial privado y consumo auditable.
+- Adjuntos privados de hasta 15 MB: PDF, DOCX, XLSX, CSV, texto, código e imágenes.
+- Análisis de documentos e imágenes mediante entradas multimodales del proveedor.
+- Panel «Pensamiento» con actividad resumida de agentes y trabajo técnico plegable.
+- Generación de imágenes para Premium mediante un proveedor compatible con OpenAI Images.
 - Creación y descarga de ZIP, PDF, XLSX, DOCX y HTML desde el propio chat.
 - Token personal rotatorio para endpoints compatibles con Anthropic y OpenAI Responses.
 - Panel de configuración con cuenta, plan, facturación, días, créditos e integraciones.
@@ -83,6 +87,20 @@ el contenido completo, lo convierte en el formato real, lo guarda como binario e
 base de datos y muestra un botón de descarga. Al usar PostgreSQL, los archivos sobreviven
 a reinicios de Render.
 
+El código y el contenido extenso usados para construir un archivo no saturan la respuesta:
+quedan plegados en **Pensamiento → Trabajo técnico**. Este panel presenta actividad útil
+de Analista, Creador y Revisor, pero nunca expone el razonamiento privado del modelo.
+
+## Adjuntos e imágenes
+
+Cada cliente puede adjuntar hasta 8 archivos por mensaje. Nexia extrae localmente el texto
+de PDF, Word, Excel, CSV y archivos de texto/código; las imágenes se envían como entrada
+multimodal al proveedor de chat. Los adjuntos se almacenan ligados al propietario y a su chat.
+
+Para habilitar imágenes generadas define `OPENAI_API_KEY`. Por defecto se usa
+`gpt-image-2` en `https://api.openai.com/v1/images/generations`; el administrador también
+puede cambiar la clave, URL y modelo desde su panel. La función se limita al plan Premium.
+
 ## Claude Code y Codex
 
 Cada cliente genera su token `nxa_...` en **Configuración → Claude Code y Codex**.
@@ -105,6 +123,8 @@ proveedor subyacente acepte herramientas en su formato compatible con OpenAI.
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Administrador inicial. |
 | `API_BASE_URL` | Por defecto `https://api.mwapi.dev/v1`. |
 | `TRIAL_API_KEY` / `DAILY_MESSAGE_LIMIT` | Prueba gratuita opcional. |
+| `OPENAI_API_KEY` | Clave cifrada para generación de imágenes Premium. |
+| `IMAGE_API_BASE_URL` / `IMAGE_MODEL` | Endpoint y modelo de imágenes. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth web de Google. |
 | `APP_BASE_URL` | Origen público del sitio. |
 | `COOKIE_SECURE` | `true` en Render/HTTPS. |

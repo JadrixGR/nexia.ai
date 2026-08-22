@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import base64
 import os
 import unittest
 from urllib.parse import parse_qs, urlparse
@@ -21,7 +22,7 @@ os.environ.pop("GOOGLE_CLIENT_SECRET", None)
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Artifact, Base, Conversation, Message, SessionLocal, User, engine, init_db
+from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, Setting, User, engine, init_db
 from app.security import encrypt_api_key, generate_client_token, make_csrf
 from app.mailer import send_verification_email
 
@@ -55,6 +56,17 @@ class FakeMailResponse:
     status_code = 200
 
 
+class FakeImageResponse:
+    status_code = 200
+    text = "ok"
+
+    def json(self):
+        one_pixel_png = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        ).decode("ascii")
+        return {"data": [{"b64_json": one_pixel_png}]}
+
+
 class FakeAsyncClient:
     def __init__(self, *args, **kwargs):
         pass
@@ -70,6 +82,20 @@ class FakeAsyncClient:
 
     async def post(self, *args, **kwargs):
         return FakeJSONResponse()
+
+
+class FakeImageAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        return False
+
+    async def post(self, *args, **kwargs):
+        return FakeImageResponse()
 
 
 class NexiaFlowTests(unittest.TestCase):
@@ -179,9 +205,67 @@ class NexiaFlowTests(unittest.TestCase):
             artifact = db.query(Artifact).filter(Artifact.user_id == user_id).one()
             self.assertTrue(artifact.data.startswith(b"PK"))
             artifact_id = artifact.id
+            reply = db.query(Message).filter(Message.user_id == user_id, Message.role == "assistant").one()
+            self.assertNotIn("<!doctype html>", reply.content)
+            self.assertIn("<!doctype html>", reply.technical_content)
+            self.assertEqual(reply.response_kind, "zip")
+            self.assertIn("Analista", reply.agent_trace)
         download = self.client.get(f"/api/artifacts/{artifact_id}/download")
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.headers["content-type"], "application/zip")
+
+    def test_private_upload_is_extracted_linked_and_visible_in_chat(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        upload = self.client.post(
+            "/api/uploads",
+            files={"file": ("informe.txt", b"Ventas: 42\nRiesgo: bajo", "text/plain")},
+            headers={"X-CSRF-Token": make_csrf(user_id)},
+        )
+        self.assertEqual(upload.status_code, 200)
+        attachment_id = upload.json()["id"]
+        with patch("app.main.httpx.AsyncClient", FakeAsyncClient):
+            answer = self.client.post(
+                "/api/chat",
+                json={
+                    "message": "Resume el informe adjunto",
+                    "model": "claude-sonnet-4-6",
+                    "attachment_ids": [attachment_id],
+                },
+                headers={"X-CSRF-Token": make_csrf(user_id)},
+            )
+        self.assertEqual(answer.status_code, 200)
+        with SessionLocal() as db:
+            attachment = db.get(Attachment, attachment_id)
+            self.assertIn("Ventas: 42", attachment.extracted_text)
+            self.assertIsNotNone(attachment.message_id)
+            conversation_id = attachment.conversation_id
+        page = self.client.get(f"/chat?conversation={conversation_id}")
+        self.assertIn("informe.txt", page.text)
+
+    def test_premium_image_generation_creates_inline_artifact(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id, premium=True)
+        with SessionLocal() as db:
+            settings = db.get(Setting, 1)
+            settings.image_api_key = encrypt_api_key("sk-test-image-key")
+            settings.image_model = "gpt-image-2"
+            db.commit()
+        with patch("app.images.httpx.AsyncClient", FakeImageAsyncClient):
+            response = self.client.post(
+                "/api/chat",
+                json={"message": "Crea una imagen de una ciudad futurista", "model": "claude-opus-5"},
+                headers={"X-CSRF-Token": make_csrf(user_id)},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"is_image": true', response.text)
+        with SessionLocal() as db:
+            artifact = db.query(Artifact).filter(Artifact.user_id == user_id).one()
+            self.assertEqual(artifact.mime_type, "image/png")
+            artifact_id = artifact.id
+        preview = self.client.get(f"/api/artifacts/{artifact_id}/preview")
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.headers["content-type"], "image/png")
 
     def test_codex_and_claude_code_use_personal_token_and_credits(self):
         user_id = self.register_and_verify()

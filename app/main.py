@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import base64
 import json
 import os
 import re
@@ -11,7 +12,7 @@ from urllib.parse import urlencode
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,6 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 
 from .models import (
     Artifact,
+    Attachment,
     Conversation,
     Message,
     SessionLocal,
@@ -33,6 +35,7 @@ from .security import (
     COOKIE_NAME,
     SESSION_MAX_AGE,
     encrypt_api_key,
+    decrypt_api_key,
     hash_password,
     make_csrf,
     make_oauth_state,
@@ -66,6 +69,8 @@ from .integrations import (
     responses_sse,
     responses_to_chat,
 )
+from .images import generate_image, is_image_request
+from .uploads import MAX_UPLOAD_BYTES, extract_text, is_image, validate_upload
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -77,7 +82,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.0.0")
+app = FastAPI(title="Nexia", version="3.1.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -456,6 +461,8 @@ def chat_page(
 
     history = []
     artifacts = {}
+    message_attachments = {}
+    agent_traces = {}
     if selected:
         history = (
             db.query(Message)
@@ -474,6 +481,21 @@ def chat_page(
                 .filter(Artifact.user_id == user.id, Artifact.id.in_(artifact_ids))
                 .all()
             }
+        for attachment in (
+            db.query(Attachment)
+            .filter(Attachment.user_id == user.id, Attachment.conversation_id == selected.id)
+            .order_by(Attachment.id)
+            .all()
+        ):
+            if attachment.message_id:
+                message_attachments.setdefault(attachment.message_id, []).append(attachment)
+        for message in history:
+            if not message.agent_trace:
+                continue
+            try:
+                agent_traces[message.id] = json.loads(message.agent_trace)
+            except (json.JSONDecodeError, TypeError):
+                agent_traces[message.id] = []
 
     return templates.TemplateResponse(
         request,
@@ -487,6 +509,8 @@ def chat_page(
             selected=selected,
             history=history,
             artifacts=artifacts,
+            message_attachments=message_attachments,
+            agent_traces=agent_traces,
             active_model=choose_allowed_model(
                 user,
                 selected.model if selected else "",
@@ -616,6 +640,9 @@ def admin_settings(
     daily_message_limit: int = Form(...),
     api_base_url: str = Form(...),
     default_model: str = Form(...),
+    image_api_key: str = Form(""),
+    image_api_base_url: str = Form("https://api.openai.com/v1"),
+    image_model: str = Form("gpt-image-2"),
     db: Session = Depends(get_db),
 ):
     admin = require_admin(request, db)
@@ -630,6 +657,13 @@ def admin_settings(
     settings.default_model = (
         default_model if default_model in MODEL_IDS else "claude-sonnet-4-6"
     )
+    if image_api_key.strip():
+        clean_image_key = image_api_key.strip()
+        if not clean_image_key.startswith("sk-"):
+            return RedirectResponse("/admin?error=La+clave+de+imágenes+debe+comenzar+con+sk-", 303)
+        settings.image_api_key = encrypt_api_key(clean_image_key)
+    settings.image_api_base_url = image_api_base_url.strip().rstrip("/") or "https://api.openai.com/v1"
+    settings.image_model = image_model.strip()[:80] or "gpt-image-2"
     db.commit()
     return RedirectResponse("/admin?success=Configuración+guardada", 303)
 
@@ -709,6 +743,77 @@ def api_status(request: Request, db: Session = Depends(get_db)):
     return account_status(db, user)
 
 
+@app.post("/api/uploads")
+async def upload_attachment(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    require_csrf(request, user)
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    try:
+        filename, mime_type = validate_upload(file.filename or "archivo", file.content_type or "", data)
+        extracted = extract_text(filename, mime_type, data)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, 400)
+    attachment = Attachment(
+        user_id=user.id,
+        filename=filename,
+        mime_type=mime_type,
+        size=len(data),
+        data=data,
+        extracted_text=extracted or None,
+    )
+    db.add(attachment)
+    db.commit()
+    return {
+        "id": attachment.id,
+        "filename": attachment.filename,
+        "mime_type": attachment.mime_type,
+        "size": attachment.size,
+        "is_image": is_image(attachment.filename, attachment.mime_type),
+        "preview_url": f"/api/uploads/{attachment.id}/preview" if is_image(attachment.filename, attachment.mime_type) else None,
+    }
+
+
+@app.get("/api/uploads/{attachment_id}/preview")
+def preview_attachment(
+    attachment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    attachment = db.query(Attachment).filter(Attachment.id == attachment_id, Attachment.user_id == user.id).one_or_none()
+    if attachment is None or not is_image(attachment.filename, attachment.mime_type):
+        raise HTTPException(404, "Imagen no encontrada")
+    return Response(
+        attachment.data,
+        media_type=attachment.mime_type,
+        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@app.delete("/api/uploads/{attachment_id}")
+def delete_attachment(
+    attachment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    require_csrf(request, user)
+    attachment = db.query(Attachment).filter(
+        Attachment.id == attachment_id,
+        Attachment.user_id == user.id,
+        Attachment.message_id.is_(None),
+    ).one_or_none()
+    if attachment is None:
+        raise HTTPException(404, "Adjunto no encontrado")
+    db.delete(attachment)
+    db.commit()
+    return {"ok": True}
+
+
 @app.delete("/api/conversations/{conversation_id}")
 def delete_conversation(
     conversation_id: int,
@@ -745,10 +850,34 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "Solicitud inválida."}, 400)
 
     prompt = str(body.get("message") or "").strip()
-    if not prompt:
-        return JSONResponse({"error": "Escribe un mensaje para continuar."}, 400)
     if len(prompt) > 20_000:
         return JSONResponse({"error": "El mensaje supera el máximo de 20.000 caracteres."}, 400)
+
+    raw_attachment_ids = body.get("attachment_ids") or []
+    if not isinstance(raw_attachment_ids, list) or len(raw_attachment_ids) > 8:
+        return JSONResponse({"error": "Puedes adjuntar hasta 8 archivos por mensaje."}, 400)
+    try:
+        attachment_ids = list(dict.fromkeys(int(value) for value in raw_attachment_ids))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "La lista de archivos adjuntos no es válida."}, 400)
+    attachments = []
+    if attachment_ids:
+        attachments = (
+            db.query(Attachment)
+            .filter(
+                Attachment.user_id == user.id,
+                Attachment.id.in_(attachment_ids),
+                Attachment.message_id.is_(None),
+            )
+            .order_by(Attachment.id)
+            .all()
+        )
+        if len(attachments) != len(attachment_ids):
+            return JSONResponse({"error": "Uno de los archivos ya no está disponible."}, 400)
+    if not prompt and attachments:
+        prompt = "Analiza los archivos adjuntos y presenta los hallazgos importantes."
+    if not prompt:
+        return JSONResponse({"error": "Escribe un mensaje o adjunta un archivo para continuar."}, 400)
 
     requested_model = str(body.get("model") or "")
     if requested_model in MODEL_IDS and requested_model not in allowed_model_ids(user):
@@ -758,6 +887,19 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         )
     model = choose_allowed_model(user, requested_model, get_settings(db).default_model)
     artifact_kind = requested_kind(prompt)
+    image_task = is_image_request(prompt)
+    if image_task and effective_plan(user) != "premium":
+        return JSONResponse(
+            {"error": "La generación de imágenes requiere el plan Premium.", "upgrade_required": True},
+            403,
+        )
+    image_settings = get_settings(db)
+    image_api_key = decrypt_api_key(image_settings.image_api_key) if image_settings.image_api_key else ""
+    if image_task and not image_api_key:
+        return JSONResponse(
+            {"error": "La generación de imágenes aún no está configurada por el administrador."},
+            503,
+        )
 
     conversation = None
     raw_conversation_id = body.get("conversation_id")
@@ -802,6 +944,28 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         .limit(29)
         .all()
     )
+    document_context: list[str] = []
+    total_document_chars = 0
+    for attachment in attachments:
+        if attachment.extracted_text and total_document_chars < 60_000:
+            excerpt = attachment.extracted_text[: min(30_000, 60_000 - total_document_chars)]
+            document_context.append(f"\n--- Archivo: {attachment.filename} ---\n{excerpt}")
+            total_document_chars += len(excerpt)
+
+    image_attachments = [
+        attachment for attachment in attachments if is_image(attachment.filename, attachment.mime_type)
+    ]
+    if len(image_attachments) > 4 or sum(item.size for item in image_attachments) > 20 * 1024 * 1024:
+        refund(db, user, access)
+        return JSONResponse({"error": "Para analizar imágenes usa hasta 4 archivos y 20 MB en total."}, 400)
+
+    artifact_instruction = ""
+    if artifact_kind:
+        artifact_instruction = (
+            f" El usuario solicitó un archivo {artifact_kind.upper()}. Devuelve solamente el contenido final "
+            "completo que se debe guardar, usando bloques de código con su lenguaje cuando corresponda. "
+            "No incluyas instrucciones para copiar, comprimir ni ejecutar comandos de descarga."
+        )
     provider_messages = [{
         "role": "system",
         "content": (
@@ -809,27 +973,98 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
             "pero no reveles razonamientos privados paso a paso. Entrega conclusiones claras, supuestos y "
             "pasos verificables. Cuando el usuario pida un archivo, genera el contenido completo y válido; "
             "Nexia convertirá tu respuesta en un archivo descargable. Nunca digas que no puedes adjuntar archivos."
+            + artifact_instruction
         ),
     }, *[
         {"role": item.role, "content": item.content}
         for item in reversed(previous)
         if item.content
     ]]
-    provider_messages.append({"role": "user", "content": prompt})
+    provider_prompt = prompt + "".join(document_context)
+    if image_attachments:
+        multimodal_content: list[dict] = [{"type": "text", "text": provider_prompt}]
+        for attachment in image_attachments:
+            encoded = base64.b64encode(attachment.data).decode("ascii")
+            multimodal_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{attachment.mime_type};base64,{encoded}"},
+            })
+        provider_messages.append({"role": "user", "content": multimodal_content})
+    else:
+        provider_messages.append({"role": "user", "content": provider_prompt})
 
-    db.add(
-        Message(
-            user_id=user.id,
-            conversation_id=conversation.id,
-            role="user",
-            content=prompt,
-        )
+    user_message = Message(
+        user_id=user.id,
+        conversation_id=conversation.id,
+        role="user",
+        content=prompt,
     )
+    db.add(user_message)
+    db.flush()
+    for attachment in attachments:
+        attachment.conversation_id = conversation.id
+        attachment.message_id = user_message.id
     db.commit()
     conversation_id = conversation.id
     conversation_title = conversation.title
 
     async def stream():
+        agent_trace = [
+            {"id": "analyst", "label": "Analista", "detail": "Comprende la solicitud y los adjuntos.", "status": "completed"},
+            {"id": "creator", "label": "Creador", "detail": "Genera la respuesta o el archivo solicitado.", "status": "completed"},
+            {"id": "reviewer", "label": "Revisor", "detail": "Valida la entrega antes de presentarla.", "status": "completed"},
+        ]
+        yield _sse_stage("analyst", "Analista", "Interpretando la solicitud y los adjuntos…", "running")
+
+        if image_task:
+            yield _sse_stage("analyst", "Analista", "Solicitud visual preparada.", "completed")
+            yield _sse_stage("creator", "Creador visual", "Generando la imagen en segundo plano…", "running")
+            try:
+                generated = await generate_image(
+                    api_key=image_api_key,
+                    base_url=image_settings.image_api_base_url,
+                    model=image_settings.image_model,
+                    prompt=prompt,
+                )
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                refund(db, user, access)
+                yield _sse_error(f"No se pudo generar la imagen: {exc}")
+                return
+            artifact = Artifact(
+                user_id=user.id,
+                conversation_id=conversation_id,
+                filename=generated.filename,
+                mime_type=generated.mime_type,
+                size=len(generated.data),
+                data=generated.data,
+            )
+            db.add(artifact)
+            db.flush()
+            summary = "Imagen creada y lista para visualizar o descargar."
+            db.add(Message(
+                user_id=user.id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=summary,
+                artifact_id=artifact.id,
+                technical_content=f"Prompt visual enviado al modelo {image_settings.image_model}:\n{prompt}",
+                response_kind="image",
+                agent_trace=json.dumps(agent_trace, ensure_ascii=False),
+            ))
+            saved_conversation = db.get(Conversation, conversation_id)
+            if saved_conversation:
+                saved_conversation.updated_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+            db.commit()
+            yield _sse_stage("creator", "Creador visual", "Imagen generada.", "completed")
+            yield _sse_stage("reviewer", "Revisor", "Formato y entrega validados.", "completed")
+            yield f"data: {json.dumps({'summary': summary})}\n\n"
+            yield f"data: {json.dumps({'technical': f'Prompt visual enviado al modelo {image_settings.image_model}:\n{prompt}'})}\n\n"
+            yield f"data: {json.dumps({'artifact': _artifact_payload(artifact)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        yield _sse_stage("analyst", "Analista", "Solicitud preparada para el modelo.", "completed")
+        yield _sse_stage("creator", "Creador", "Redactando y construyendo en segundo plano…", "running")
         collected: list[str] = []
         try:
             async with httpx.AsyncClient(
@@ -869,7 +1104,8 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
                             continue
                         if delta:
                             collected.append(str(delta))
-                            yield f"data: {json.dumps({'delta': str(delta)})}\n\n"
+                            if not artifact_kind:
+                                yield f"data: {json.dumps({'delta': str(delta)})}\n\n"
         except httpx.HTTPError as exc:
             refund(db, user, access)
             yield _sse_error(f"No se pudo contactar con el proveedor: {exc}")
@@ -882,6 +1118,7 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
             return
 
         artifact = None
+        build_error = None
         if artifact_kind:
             try:
                 built = build_artifact(artifact_kind, answer)
@@ -896,24 +1133,39 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
                     )
                     db.add(artifact)
                     db.flush()
-            except Exception:
-                # La respuesta de texto sigue siendo útil si una librería de exportación falla.
-                artifact = None
+            except Exception as exc:
+                build_error = exc.__class__.__name__
+        if artifact_kind and artifact:
+            visible_answer = f"He creado {artifact.filename} y está listo para descargar."
+        elif artifact_kind:
+            visible_answer = "Preparé el contenido, pero no pude construir el archivo descargable. Puedes revisar el trabajo técnico en Pensamiento."
+        else:
+            visible_answer = answer
+        if build_error:
+            agent_trace[-1]["detail"] = f"El contenido quedó disponible, pero falló el empaquetado ({build_error})."
         db.add(
             Message(
                 user_id=user.id,
                 conversation_id=conversation_id,
                 role="assistant",
-                content=answer,
+                content=visible_answer,
                 artifact_id=artifact.id if artifact else None,
+                technical_content=answer if artifact_kind else None,
+                response_kind=artifact_kind or "text",
+                agent_trace=json.dumps(agent_trace, ensure_ascii=False),
             )
         )
         saved_conversation = db.get(Conversation, conversation_id)
         if saved_conversation:
             saved_conversation.updated_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
         db.commit()
+        yield _sse_stage("creator", "Creador", "Contenido generado.", "completed")
+        yield _sse_stage("reviewer", "Revisor", "Entrega revisada y preparada.", "completed")
+        if artifact_kind:
+            yield f"data: {json.dumps({'summary': visible_answer})}\n\n"
+            yield f"data: {json.dumps({'technical': answer})}\n\n"
         if artifact:
-            yield f"data: {json.dumps({'artifact': {'id': artifact.id, 'filename': artifact.filename, 'size': artifact.size, 'url': f'/api/artifacts/{artifact.id}/download'}})}\n\n"
+            yield f"data: {json.dumps({'artifact': _artifact_payload(artifact)})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -928,6 +1180,24 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
             "X-Usage-Mode": access.mode,
         },
     )
+
+
+def _sse_stage(stage_id: str, label: str, detail: str, status: str) -> str:
+    payload = {"stage": {"id": stage_id, "label": label, "detail": detail, "status": status}}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _artifact_payload(artifact: Artifact) -> dict:
+    image_artifact = artifact.mime_type.startswith("image/")
+    return {
+        "id": artifact.id,
+        "filename": artifact.filename,
+        "mime_type": artifact.mime_type,
+        "size": artifact.size,
+        "url": f"/api/artifacts/{artifact.id}/download",
+        "preview_url": f"/api/artifacts/{artifact.id}/preview" if image_artifact else None,
+        "is_image": image_artifact,
+    }
 
 
 def _sse_error(message: str) -> str:
@@ -957,6 +1227,27 @@ def download_artifact(
             "Content-Length": str(artifact.size),
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@app.get("/api/artifacts/{artifact_id}/preview")
+def preview_artifact(
+    artifact_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    artifact = (
+        db.query(Artifact)
+        .filter(Artifact.id == artifact_id, Artifact.user_id == user.id)
+        .one_or_none()
+    )
+    if artifact is None or not artifact.mime_type.startswith("image/"):
+        raise HTTPException(404, "Imagen no encontrada")
+    return Response(
+        content=artifact.data,
+        media_type=artifact.mime_type,
+        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"},
     )
 
 

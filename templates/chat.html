@@ -108,11 +108,48 @@
         <div class="message-content">
           <span class="message-author">{{ 'Nexia' if message.role == 'assistant' else 'Tú' }}</span>
           <p>{{ message.content }}</p>
+          {% if message_attachments.get(message.id) %}
+          <div class="message-attachments">
+            {% for attachment in message_attachments.get(message.id) %}
+            <div class="message-attachment">
+              {% if attachment.mime_type.startswith('image/') %}
+              <img src="/api/uploads/{{ attachment.id }}/preview" alt="{{ attachment.filename }}" loading="lazy" />
+              {% else %}<span>▧</span>{% endif %}
+              <div><b>{{ attachment.filename }}</b><small>{{ (attachment.size / 1024)|round(1) }} KB</small></div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
           {% if message.artifact_id and artifacts.get(message.artifact_id) %}
           {% set artifact = artifacts.get(message.artifact_id) %}
+          {% if artifact.mime_type.startswith('image/') %}
+          <a class="generated-image" href="/api/artifacts/{{ artifact.id }}/download" title="Descargar {{ artifact.filename }}">
+            <img src="/api/artifacts/{{ artifact.id }}/preview" alt="Imagen generada por Nexia" loading="lazy" />
+          </a>
+          {% endif %}
           <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
             <span>↓</span><div><b>{{ artifact.filename }}</b><small>{{ (artifact.size / 1024)|round(1) }} KB · listo para descargar</small></div><em>Descargar</em>
           </a>
+          {% endif %}
+          {% if message.role == 'assistant' and (message.technical_content or agent_traces.get(message.id)) %}
+          <details class="thought-panel">
+            <summary><span>✦</span> Pensamiento <em>Ver actividad</em></summary>
+            <div class="thought-body">
+              <p class="thought-note">Actividad resumida y registro técnico. El razonamiento privado del modelo no se muestra.</p>
+              {% if agent_traces.get(message.id) %}
+              <div class="agent-timeline">
+                {% for agent in agent_traces.get(message.id) %}
+                <div class="agent-step {{ agent.status }}" data-stage="{{ agent.id }}">
+                  <i></i><div><b>{{ agent.label }}</b><span>{{ agent.detail }}</span></div><em>{{ 'Listo' if agent.status == 'completed' else 'Trabajando' }}</em>
+                </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+              {% if message.technical_content %}
+              <div class="technical-output"><div><b>Trabajo técnico</b><button type="button" data-copy-technical>Copiar</button></div><pre><code>{{ message.technical_content }}</code></pre></div>
+              {% endif %}
+            </div>
+          </details>
           {% endif %}
         </div>
       </article>
@@ -121,10 +158,12 @@
 
     <footer class="chat-composer-wrap">
       <div class="chat-composer">
+        <div class="upload-strip" id="upload-strip" hidden></div>
         <textarea id="input" rows="1" maxlength="20000" placeholder="Escribe un mensaje a Nexia..." aria-label="Mensaje"></textarea>
         <div class="composer-bottom">
           <div class="composer-controls">
-            <span class="composer-plus" title="Nexia puede crear archivos">＋</span>
+            <button class="composer-plus" id="attach-button" type="button" title="Adjuntar documentos o imágenes" aria-label="Adjuntar archivos">＋</button>
+            <input id="file-input" type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.json,.html,.py,.js,.ts,.css,.xml,.png,.jpg,.jpeg,.webp,.gif" />
             <select id="model" aria-label="Modelo de inteligencia artificial">
               {% for model in models %}
               <option value="{{ model.id }}" {% if active_model == model.id %}selected{% endif %} {% if not model.allowed %}disabled{% endif %}>{{ model.label }}{% if not model.allowed %} · Premium 🔒{% endif %}</option>
@@ -135,7 +174,7 @@
           <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
         </div>
       </div>
-      <p>Pide ZIP, PDF, Excel, Word o HTML y Nexia te entregará un archivo descargable.</p>
+      <p>Adjunta documentos o imágenes. También puedes pedir ZIP, PDF, Excel, Word, HTML o una imagen.</p>
     </footer>
   </main>
 </div>
@@ -144,6 +183,7 @@
   const csrfToken = {{ csrf_token|tojson }};
   let conversationId = {{ (selected.id if selected else none)|tojson }};
   let busy = false;
+  let pendingUploads = [];
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("input");
@@ -152,6 +192,9 @@
   const usage = document.getElementById("usage");
   const sidebar = document.getElementById("sidebar");
   const backdrop = document.getElementById("sidebar-backdrop");
+  const attachButton = document.getElementById("attach-button");
+  const fileInput = document.getElementById("file-input");
+  const uploadStrip = document.getElementById("upload-strip");
 
   function openSidebar(open) {
     sidebar.classList.toggle("open", open);
@@ -166,7 +209,7 @@
     thread.scrollTop = thread.scrollHeight;
   }
 
-  function addMessage(role, text) {
+  function addMessage(role, text, attachments = []) {
     document.getElementById("chat-empty")?.remove();
     const article = document.createElement("article");
     article.className = "chat-message " + role;
@@ -183,13 +226,117 @@
     const paragraph = document.createElement("p");
     paragraph.textContent = text;
     content.append(author, paragraph);
+    if (attachments.length) addAttachmentCards(content, attachments);
     article.append(avatar, content);
     thread.appendChild(article);
     scrollToEnd();
     return { article, paragraph };
   }
 
+  function addAttachmentCards(content, attachments) {
+    const list = document.createElement("div");
+    list.className = "message-attachments";
+    attachments.forEach((attachment) => {
+      const card = document.createElement("div");
+      card.className = "message-attachment";
+      if (attachment.is_image && attachment.preview_url) {
+        const image = document.createElement("img");
+        image.src = attachment.preview_url;
+        image.alt = attachment.filename;
+        card.appendChild(image);
+      } else {
+        const icon = document.createElement("span");
+        icon.textContent = "▧";
+        card.appendChild(icon);
+      }
+      const info = document.createElement("div");
+      const name = document.createElement("b");
+      name.textContent = attachment.filename;
+      const size = document.createElement("small");
+      size.textContent = Math.max(1, attachment.size / 1024).toFixed(1) + " KB";
+      info.append(name, size);
+      card.appendChild(info);
+      list.appendChild(card);
+    });
+    content.appendChild(list);
+  }
+
+  function addAgentPanel(target) {
+    const details = document.createElement("details");
+    details.className = "thought-panel";
+    const summary = document.createElement("summary");
+    summary.innerHTML = "<span>✦</span> Pensamiento <em>Ver actividad</em>";
+    const body = document.createElement("div");
+    body.className = "thought-body";
+    const note = document.createElement("p");
+    note.className = "thought-note";
+    note.textContent = "Actividad resumida y registro técnico. El razonamiento privado del modelo no se muestra.";
+    const timeline = document.createElement("div");
+    timeline.className = "agent-timeline";
+    body.append(note, timeline);
+    details.append(summary, body);
+    target.article.querySelector(".message-content").appendChild(details);
+    target.thought = { details, body, timeline };
+    return target.thought;
+  }
+
+  function updateStage(target, stage) {
+    const thought = target.thought || addAgentPanel(target);
+    let row = thought.timeline.querySelector('[data-stage="' + stage.id + '"]');
+    if (!row) {
+      row = document.createElement("div");
+      row.dataset.stage = stage.id;
+      row.innerHTML = "<i></i><div><b></b><span></span></div><em></em>";
+      thought.timeline.appendChild(row);
+    }
+    row.className = "agent-step " + stage.status;
+    row.querySelector("b").textContent = stage.label;
+    row.querySelector("span").textContent = stage.detail;
+    row.querySelector("em").textContent = stage.status === "completed" ? "Listo" : "Trabajando";
+  }
+
+  function addTechnicalOutput(target, technical) {
+    if (!technical) return;
+    const thought = target.thought || addAgentPanel(target);
+    let output = thought.body.querySelector(".technical-output");
+    if (!output) {
+      output = document.createElement("div");
+      output.className = "technical-output";
+      const head = document.createElement("div");
+      const label = document.createElement("b");
+      label.textContent = "Trabajo técnico";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "Copiar";
+      copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(output.querySelector("code").textContent);
+        copy.textContent = "Copiado";
+        setTimeout(() => copy.textContent = "Copiar", 1200);
+      });
+      head.append(label, copy);
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.textContent = technical;
+      pre.appendChild(code);
+      output.append(head, pre);
+      thought.body.appendChild(output);
+    } else {
+      output.querySelector("code").textContent = technical;
+    }
+  }
+
   function addArtifact(target, artifact) {
+    const content = target.article.querySelector(".message-content");
+    if (artifact.is_image && artifact.preview_url) {
+      const preview = document.createElement("a");
+      preview.className = "generated-image";
+      preview.href = artifact.url;
+      const image = document.createElement("img");
+      image.src = artifact.preview_url;
+      image.alt = "Imagen generada por Nexia";
+      preview.appendChild(image);
+      content.appendChild(preview);
+    }
     const link = document.createElement("a");
     link.className = "artifact-card";
     link.href = artifact.url;
@@ -204,7 +351,7 @@
     const action = document.createElement("em");
     action.textContent = "Descargar";
     link.append(icon, info, action);
-    target.article.querySelector(".message-content").appendChild(link);
+    content.appendChild(link);
   }
 
   function addConversationToSidebar(id, title) {
@@ -248,15 +395,88 @@
     }
   }
 
+  function renderPendingUploads() {
+    uploadStrip.replaceChildren();
+    uploadStrip.hidden = pendingUploads.length === 0;
+    pendingUploads.forEach((attachment) => {
+      const chip = document.createElement("div");
+      chip.className = "upload-chip";
+      if (attachment.is_image && attachment.preview_url) {
+        const image = document.createElement("img");
+        image.src = attachment.preview_url;
+        image.alt = "";
+        chip.appendChild(image);
+      } else {
+        const icon = document.createElement("span");
+        icon.textContent = "▧";
+        chip.appendChild(icon);
+      }
+      const info = document.createElement("div");
+      const name = document.createElement("b");
+      name.textContent = attachment.filename;
+      const size = document.createElement("small");
+      size.textContent = Math.max(1, attachment.size / 1024).toFixed(1) + " KB";
+      info.append(name, size);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.title = "Quitar archivo";
+      remove.addEventListener("click", async () => {
+        const response = await fetch("/api/uploads/" + attachment.id, {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": csrfToken },
+        });
+        if (response.ok) {
+          pendingUploads = pendingUploads.filter((item) => item.id !== attachment.id);
+          renderPendingUploads();
+        }
+      });
+      chip.append(info, remove);
+      uploadStrip.appendChild(chip);
+    });
+  }
+
+  async function uploadFiles(files) {
+    const available = Math.max(0, 8 - pendingUploads.length);
+    const selected = Array.from(files).slice(0, available);
+    if (!selected.length) return;
+    attachButton.disabled = true;
+    attachButton.textContent = "…";
+    try {
+      for (const file of selected) {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch("/api/uploads", {
+          method: "POST",
+          headers: { "X-CSRF-Token": csrfToken },
+          body: form,
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          alert(result.error || "No se pudo adjuntar " + file.name);
+          continue;
+        }
+        pendingUploads.push(result);
+        renderPendingUploads();
+      }
+    } finally {
+      attachButton.disabled = false;
+      attachButton.textContent = "＋";
+      fileInput.value = "";
+    }
+  }
+
   async function send() {
     const message = input.value.trim();
-    if (!message || busy) return;
+    if ((!message && !pendingUploads.length) || busy) return;
+    const sentUploads = [...pendingUploads];
     busy = true;
     sendButton.disabled = true;
     input.value = "";
     input.style.height = "auto";
-    addMessage("user", message);
-    const target = addMessage("assistant", "Pensando…");
+    addMessage("user", message || "Analiza los archivos adjuntos.", sentUploads);
+    const target = addMessage("assistant", "Coordinando agentes…");
+    addAgentPanel(target);
     target.article.classList.add("loading");
     let answer = "";
 
@@ -271,6 +491,7 @@
           conversation_id: conversationId,
           model: modelSelect.value,
           message,
+          attachment_ids: sentUploads.map((item) => item.id),
         }),
       });
 
@@ -280,12 +501,14 @@
         target.article.classList.add("error-message");
         return;
       }
+      pendingUploads = [];
+      renderPendingUploads();
 
       const returnedId = Number(response.headers.get("X-Conversation-Id"));
       const isNew = response.headers.get("X-New-Conversation") === "1";
       if (returnedId && (!conversationId || isNew)) {
         conversationId = returnedId;
-        const title = message.replace(/\s+/g, " ").slice(0, 58);
+        const title = (message || sentUploads[0]?.filename || "Nueva conversación").replace(/\s+/g, " ").slice(0, 58);
         history.replaceState({}, "", "/chat?conversation=" + returnedId);
         document.getElementById("current-title").textContent = title;
         addConversationToSidebar(returnedId, title);
@@ -309,6 +532,22 @@
             target.paragraph.textContent = chunk.error;
             target.article.classList.add("error-message");
             return;
+          }
+          if (chunk.stage) {
+            updateStage(target, chunk.stage);
+            target.paragraph.textContent = chunk.stage.detail;
+            scrollToEnd();
+            continue;
+          }
+          if (chunk.summary) {
+            answer = chunk.summary;
+            target.paragraph.textContent = chunk.summary;
+            target.article.classList.remove("loading");
+            continue;
+          }
+          if (chunk.technical) {
+            addTechnicalOutput(target, chunk.technical);
+            continue;
           }
           if (chunk.artifact) {
             addArtifact(target, chunk.artifact);
@@ -354,6 +593,16 @@
   }
 
   document.querySelectorAll("[data-delete]").forEach(bindDelete);
+  attachButton.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
+  document.querySelectorAll("[data-copy-technical]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const code = button.closest(".technical-output")?.querySelector("code")?.textContent || "";
+      await navigator.clipboard.writeText(code);
+      button.textContent = "Copiado";
+      setTimeout(() => button.textContent = "Copiar", 1200);
+    });
+  });
   document.querySelectorAll("[data-prompt]").forEach((button) => {
     button.addEventListener("click", () => {
       input.value = button.dataset.prompt;

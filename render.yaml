@@ -26,6 +26,13 @@ services:
         value: https://api.mwapi.dev/v1
       - key: DAILY_MESSAGE_LIMIT
         value: "3"
+      # Generación visual Premium mediante una API compatible con OpenAI Images.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: IMAGE_API_BASE_URL
+        value: https://api.openai.com/v1
+      - key: IMAGE_MODEL
+        value: gpt-image-2
       # OAuth de Google. APP_BASE_URL debe ser la URL pública de Render.
       - key: GOOGLE_CLIENT_ID
         sync: false
