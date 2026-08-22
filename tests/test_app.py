@@ -22,6 +22,7 @@ os.environ.pop("GOOGLE_CLIENT_SECRET", None)
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.artifacts import build_artifact
 from app.models import Attachment, Artifact, Base, Conversation, Message, SessionLocal, User, engine, init_db
 from app.security import encrypt_api_key, generate_client_token, make_csrf
 from app.mailer import send_verification_email
@@ -259,10 +260,71 @@ class NexiaFlowTests(unittest.TestCase):
         download = self.client.get(f"/api/artifacts/{artifact_id}/download")
         self.assertIn("wordprocessingml", download.headers["content-type"])
         page = self.client.get(f"/chat?conversation={conversation_id}")
-        self.assertIn("documento-nexia.docx", page.text)
+        self.assertIn("pacman-nexia.docx", page.text)
         self.assertNotIn("Pensamiento", page.text)
         self.assertNotIn("&lt;!doctype html&gt;", page.text.lower())
         self.assertIn("Pensando…", page.text)
+        self.assertIn("Ctrl+V", page.text)
+        self.assertIn('input.addEventListener("paste"', page.text)
+
+    def test_pdf_export_strips_chat_html_and_download_instructions(self):
+        source = """Aquí tienes nuevamente el documento para Word.
+```html
+<html><body><p>Print</p><p>100</p>
+<h1>Contrato de Compra y Venta</h1>
+<h2>PRIMERA: IDENTIFICACIÓN DE LAS PARTES</h2>
+<p>EL VENDEDOR: [NOMBRE COMPLETO].</p>
+<ul><li>Documento de identidad: [DNI].</li></ul>
+<h2>FIRMAS</h2><p>EL VENDEDOR: ____________________</p><p>EL COMPRADOR: ____________________</p>
+</body></html>
+```
+Este archivo se guarda con extensión .doc y se abre directamente en Word."""
+        artifact = build_artifact("pdf", source)
+        self.assertIsNotNone(artifact)
+        self.assertEqual(artifact.filename, "contrato-de-compra-y-venta-nexia.pdf")
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(artifact.data))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        self.assertIn("Contrato de Compra y Venta", text)
+        self.assertIn("____________________", text)
+        self.assertIn("Página 1", text)
+        self.assertNotIn("Documento generado por Nexia AI", text)
+        self.assertNotIn("Aquí tienes", text)
+        self.assertNotIn("```", text)
+        self.assertNotIn("Este archivo se guarda", text)
+        self.assertNotIn("Print", text)
+
+    def test_word_export_has_a4_styles_and_clean_document_content(self):
+        source = """Claro, te preparo el documento.
+```markdown
+# Contrato de Compra y Venta
+## PRIMERA: IDENTIFICACIÓN DE LAS PARTES
+EL VENDEDOR: [NOMBRE COMPLETO].
+
+- Documento de identidad: [DNI].
+
+## FIRMAS
+EL VENDEDOR: ____________________
+
+EL COMPRADOR: ____________________
+```
+Para descargarlo, copia este contenido."""
+        artifact = build_artifact("docx", source)
+        self.assertIsNotNone(artifact)
+        self.assertEqual(artifact.filename, "contrato-de-compra-y-venta-nexia.docx")
+        from docx import Document
+        from docx.shared import Mm
+
+        document = Document(io.BytesIO(artifact.data))
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        self.assertIn("Contrato de Compra y Venta", text)
+        self.assertIn("____________________", text)
+        self.assertNotIn("Claro, te preparo", text)
+        self.assertNotIn("```", text)
+        self.assertNotIn("Para descargarlo", text)
+        self.assertAlmostEqual(document.sections[0].page_width.mm, Mm(210).mm, places=1)
+        self.assertEqual(document.styles["Normal"].font.name, "Calibri")
 
     def test_claude_image_request_creates_safe_svg_artifact(self):
         user_id = self.register_and_verify()

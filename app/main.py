@@ -82,7 +82,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.1.1")
+app = FastAPI(title="Nexia", version="3.1.2")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -933,17 +933,25 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
 
     artifact_instruction = ""
     if artifact_kind:
-        artifact_instruction = (
-            f" El usuario solicitó un archivo {artifact_kind.upper()}. Devuelve solamente el contenido final "
-            "completo que se debe guardar, usando bloques de código con su lenguaje cuando corresponda. "
-            "No incluyas instrucciones para copiar, comprimir ni ejecutar comandos de descarga."
-        )
-        if artifact_kind == "docx":
-            artifact_instruction += " Para Word entrega Markdown estructurado, nunca HTML."
+        if artifact_kind in {"docx", "pdf"}:
+            artifact_instruction = (
+                f" El usuario solicitó un archivo {artifact_kind.upper()}. Devuelve exclusivamente el documento "
+                "final en Markdown estructurado: empieza con un único '# Título', usa '##' para secciones, "
+                "párrafos y listas reales. No escribas saludos, explicaciones, etiquetas HTML, bloques de código, "
+                "instrucciones de descarga ni texto después del documento. Usa [CAMPO A COMPLETAR] para los datos "
+                "que el usuario deba modificar. Si es una plantilla legal, contractual, médica o financiera, "
+                "preséntala como referencia editable y recomienda revisión profesional local sin inventar garantías."
+            )
         elif artifact_kind == "svg":
-            artifact_instruction += (
+            artifact_instruction = (
                 " Claude no genera imágenes raster. Crea una ilustración SVG completa, autocontenida, "
                 "sin scripts, recursos externos ni explicaciones fuera de un único bloque ```svg."
+            )
+        else:
+            artifact_instruction = (
+                f" El usuario solicitó un archivo {artifact_kind.upper()}. Devuelve solamente el contenido final "
+                "completo que se debe guardar, usando bloques de código con su lenguaje cuando corresponda. "
+                "No incluyas instrucciones para copiar, comprimir ni ejecutar comandos de descarga."
             )
     provider_messages = [{
         "role": "system",
@@ -1337,5 +1345,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.1.1"),
+        "version": os.environ.get("APP_VERSION", "3.1.2"),
     }

@@ -153,7 +153,7 @@
           <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
         </div>
       </div>
-      <p>Adjunta documentos o imágenes. También puedes pedir ZIP, PDF, Excel, Word, HTML o una imagen.</p>
+      <p>Adjunta archivos o pega una imagen con Ctrl+V. También puedes pedir ZIP, PDF, Excel, Word, HTML o una imagen.</p>
     </footer>
   </main>
 </div>
@@ -412,6 +412,33 @@
       fileInput.value = "";
     }
   }
+
+  function clipboardImageFile(file, index) {
+    const extensions = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/webp": "webp",
+      "image/gif": "gif",
+    };
+    const extension = extensions[file.type] || "png";
+    const filename = "imagen-pegada-" + Date.now() + (index ? "-" + (index + 1) : "") + "." + extension;
+    return new File([file], filename, { type: file.type || "image/png", lastModified: Date.now() });
+  }
+
+  input.addEventListener("paste", (event) => {
+    if (busy || !event.clipboardData) return;
+    const itemImages = Array.from(event.clipboardData.items || [])
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    const fallbackImages = Array.from(event.clipboardData.files || [])
+      .filter((file) => file.type.startsWith("image/"));
+    const images = (itemImages.length ? itemImages : fallbackImages)
+      .map((file, index) => clipboardImageFile(file, index));
+    if (!images.length) return;
+    event.preventDefault();
+    uploadFiles(images);
+  });
 
   async function send() {
     const message = input.value.trim();
