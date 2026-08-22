@@ -5,13 +5,14 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 from .models import (
+    Artifact,
     Conversation,
     Message,
     SessionLocal,
@@ -39,29 +41,43 @@ from .security import (
     verify_csrf,
     verify_oauth_state,
     verify_password,
+    generate_client_token,
+    hash_client_token,
+    hash_verification_code,
+    verify_verification_code,
 )
 from .usage import account_status, consume, get_settings, refund
+from .artifacts import build_artifact, requested_kind
+from .mailer import send_verification_email
+from .plans import (
+    MODEL_CATALOG,
+    MODEL_IDS,
+    allowed_model_ids,
+    choose_allowed_model,
+    effective_plan,
+    models_for_user,
+    utcnow,
+)
+from .integrations import (
+    anthropic_sse,
+    anthropic_to_chat,
+    chat_to_anthropic,
+    chat_to_response,
+    responses_sse,
+    responses_to_chat,
+)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # IDs copiados de la documentación entregada por el usuario.
-CHAT_MODELS = [
-    ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
-    ("claude-sonnet-5", "Claude Sonnet 5"),
-    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
-    ("claude-opus-4-6", "Claude Opus 4.6"),
-    ("claude-opus-4-7", "Claude Opus 4.7"),
-    ("claude-opus-4-8", "Claude Opus 4.8"),
-    ("claude-opus-5", "Claude Opus 5"),
-]
-MODEL_IDS = {model_id for model_id, _label in CHAT_MODELS}
+CHAT_MODELS = [(model_id, label) for model_id, label, _tier in MODEL_CATALOG]
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="2.0.0")
+app = FastAPI(title="Nexia", version="3.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -87,6 +103,8 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = current_user(request, db)
     if user is None:
         raise HTTPException(status_code=401, detail="Inicia sesión para continuar.")
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Verifica tu correo para continuar.")
     return user
 
 
@@ -137,6 +155,32 @@ def _google_redirect_uri(request: Request) -> str:
 def _first_user_can_be_admin(db: Session) -> bool:
     enabled = os.environ.get("FIRST_USER_IS_ADMIN", "false").lower() == "true"
     return enabled and db.query(User).count() == 0
+
+
+def _issue_verification_code(db: Session, user: User, *, force: bool = False) -> tuple[bool, str, str | None]:
+    now = utcnow()
+    if (
+        not force
+        and user.verification_sent_at
+        and (now - user.verification_sent_at).total_seconds() < 60
+    ):
+        return False, "Espera un minuto antes de solicitar otro código.", None
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    user.verification_code_hash = hash_verification_code(user.id, code)
+    user.verification_expires_at = now + dt.timedelta(minutes=10)
+    user.verification_sent_at = now
+    user.verification_attempts = 0
+    db.commit()
+    delivered, detail = send_verification_email(user.email, user.name, code)
+    dev_code = detail if delivered and detail == code else None
+    return delivered, detail, dev_code
+
+
+def _verification_redirect(delivered: bool, detail: str, dev_code: str | None = None) -> str:
+    params = {"sent": "1" if delivered else "0", "message": detail}
+    if dev_code:
+        params["dev_code"] = dev_code
+    return "/verificar?" + urlencode(params)
 
 
 # -------------------------------------------------------------------- páginas
@@ -195,8 +239,9 @@ def register(
         is_admin=_first_user_can_be_admin(db),
     )
     db.add(user)
-    db.commit()
-    response = RedirectResponse("/chat?new=1", 303)
+    db.flush()
+    delivered, detail, dev_code = _issue_verification_code(db, user, force=True)
+    response = RedirectResponse(_verification_redirect(delivered, detail, dev_code), 303)
     _set_session_cookie(response, request, user.id)
     return response
 
@@ -211,9 +256,80 @@ def login(
     user = db.query(User).filter(User.email == email.strip().lower()).one_or_none()
     if user is None or not verify_password(password, user.password_hash):
         return RedirectResponse("/auth?error=Correo+o+contraseña+incorrectos", 303)
-    response = RedirectResponse("/chat", 303)
+    response = RedirectResponse("/chat" if user.email_verified else "/verificar", 303)
     _set_session_cookie(response, request, user.id)
     return response
+
+
+@app.get("/verificar", response_class=HTMLResponse)
+def verify_page(
+    request: Request,
+    sent: int | None = None,
+    message: str | None = None,
+    dev_code: str | None = None,
+    db: Session = Depends(get_db),
+):
+    user = current_user(request, db)
+    if user is None:
+        return RedirectResponse("/auth", 303)
+    if user.email_verified:
+        return RedirectResponse("/chat", 303)
+    return templates.TemplateResponse(
+        request,
+        "verify.html",
+        template_context(
+            request,
+            user,
+            sent=sent,
+            message=message,
+            dev_code=dev_code if os.environ.get("DEBUG_VERIFICATION_CODES", "false").lower() == "true" else None,
+        ),
+    )
+
+
+@app.post("/auth/verify")
+def verify_email(
+    request: Request,
+    code: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = current_user(request, db)
+    if user is None:
+        return RedirectResponse("/auth", 303)
+    require_csrf(request, user, csrf_token)
+    clean_code = re.sub(r"\D", "", code)
+    now = utcnow()
+    if user.verification_attempts >= 5:
+        return RedirectResponse("/verificar?sent=0&message=Demasiados+intentos.+Solicita+un+código+nuevo", 303)
+    if not user.verification_expires_at or user.verification_expires_at < now:
+        return RedirectResponse("/verificar?sent=0&message=El+código+caducó.+Solicita+uno+nuevo", 303)
+    user.verification_attempts += 1
+    if len(clean_code) != 6 or not verify_verification_code(user.id, clean_code, user.verification_code_hash):
+        db.commit()
+        return RedirectResponse("/verificar?sent=0&message=El+código+no+es+correcto", 303)
+    user.email_verified = True
+    user.verification_code_hash = None
+    user.verification_expires_at = None
+    user.verification_attempts = 0
+    db.commit()
+    return RedirectResponse("/chat?new=1&verified=1", 303)
+
+
+@app.post("/auth/resend")
+def resend_verification(
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = current_user(request, db)
+    if user is None:
+        return RedirectResponse("/auth", 303)
+    require_csrf(request, user, csrf_token)
+    if user.email_verified:
+        return RedirectResponse("/chat", 303)
+    delivered, detail, dev_code = _issue_verification_code(db, user)
+    return RedirectResponse(_verification_redirect(delivered, detail, dev_code), 303)
 
 
 @app.get("/auth/google")
@@ -290,6 +406,7 @@ async def google_callback(
             google_sub=google_sub,
             avatar_url=str(profile.get("picture") or "") or None,
             is_admin=_first_user_can_be_admin(db),
+            email_verified=True,
         )
         db.add(user)
     else:
@@ -297,6 +414,7 @@ async def google_callback(
         user.auth_provider = "google" if user.password_hash.startswith("!") else "local+google"
         user.name = user.name or str(profile.get("name") or "")[:100] or None
         user.avatar_url = str(profile.get("picture") or "") or user.avatar_url
+        user.email_verified = True
     db.commit()
 
     response = RedirectResponse("/chat", 303)
@@ -321,6 +439,8 @@ def chat_page(
     user = current_user(request, db)
     if user is None:
         return RedirectResponse("/auth", 303)
+    if not user.email_verified:
+        return RedirectResponse("/verificar", 303)
 
     conversations = (
         db.query(Conversation)
@@ -335,6 +455,7 @@ def chat_page(
         selected = conversations[0]
 
     history = []
+    artifacts = {}
     if selected:
         history = (
             db.query(Message)
@@ -345,6 +466,14 @@ def chat_page(
             .order_by(Message.id)
             .all()
         )
+        artifact_ids = [message.artifact_id for message in history if message.artifact_id]
+        if artifact_ids:
+            artifacts = {
+                item.id: item
+                for item in db.query(Artifact)
+                .filter(Artifact.user_id == user.id, Artifact.id.in_(artifact_ids))
+                .all()
+            }
 
     return templates.TemplateResponse(
         request,
@@ -353,19 +482,28 @@ def chat_page(
             request,
             user,
             status=account_status(db, user),
-            models=CHAT_MODELS,
+            models=models_for_user(user),
             conversations=conversations,
             selected=selected,
             history=history,
+            artifacts=artifacts,
+            active_model=choose_allowed_model(
+                user,
+                selected.model if selected else "",
+                get_settings(db).default_model,
+            ),
         ),
     )
 
 
 @app.get("/cuenta", response_class=HTMLResponse)
+@app.get("/configuracion", response_class=HTMLResponse)
 def account_page(request: Request, db: Session = Depends(get_db)):
     user = current_user(request, db)
     if user is None:
         return RedirectResponse("/auth", 303)
+    if not user.email_verified:
+        return RedirectResponse("/verificar", 303)
     events = (
         db.query(UsageEvent)
         .filter(UsageEvent.user_id == user.id)
@@ -385,8 +523,57 @@ def account_page(request: Request, db: Session = Depends(get_db)):
             status=account_status(db, user),
             events=events,
             conversation_count=conversation_count,
+            artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
+            models=models_for_user(user),
+            public_base_url=APP_BASE_URL or str(request.base_url).rstrip("/"),
         ),
     )
+
+
+@app.post("/configuracion/token", response_class=HTMLResponse)
+def rotate_client_token(
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    require_csrf(request, user, csrf_token)
+    raw, digest, prefix = generate_client_token()
+    user.client_token_hash = digest
+    user.client_token_prefix = prefix
+    user.client_token_created_at = utcnow()
+    db.commit()
+    events = db.query(UsageEvent).filter(UsageEvent.user_id == user.id).order_by(UsageEvent.id.desc()).limit(30).all()
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        template_context(
+            request,
+            user,
+            status=account_status(db, user),
+            events=events,
+            conversation_count=db.query(Conversation).filter(Conversation.user_id == user.id).count(),
+            artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
+            models=models_for_user(user),
+            public_base_url=APP_BASE_URL or str(request.base_url).rstrip("/"),
+            new_client_token=raw,
+        ),
+    )
+
+
+@app.post("/configuracion/token/revoke")
+def revoke_client_token(
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    require_csrf(request, user, csrf_token)
+    user.client_token_hash = None
+    user.client_token_prefix = None
+    user.client_token_created_at = None
+    db.commit()
+    return RedirectResponse("/configuracion?token_revoked=1", 303)
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -454,6 +641,8 @@ def admin_client(
     csrf_token: str = Form(...),
     api_key: str = Form(""),
     add_credits: int = Form(0),
+    plan: str = Form("free"),
+    premium_days: int = Form(0),
     notes: str = Form(""),
     action: str = Form(""),
     db: Session = Depends(get_db),
@@ -494,6 +683,18 @@ def admin_client(
             client.is_active = True
         if add_credits > 0:
             client.credits += add_credits
+        if plan == "premium":
+            had_active_premium = effective_plan(client) == "premium"
+            start = client.plan_expires_at if client.plan_expires_at and client.plan_expires_at > utcnow() else utcnow()
+            client.plan = "premium"
+            client.plan_started_at = client.plan_started_at or utcnow()
+            if premium_days > 0:
+                client.plan_expires_at = start + dt.timedelta(days=min(premium_days, 3650))
+            elif not had_active_premium:
+                client.plan_expires_at = start + dt.timedelta(days=30)
+        else:
+            client.plan = "free"
+            client.plan_expires_at = None
         client.notes = notes.strip()[:500] or client.notes
     db.commit()
     return RedirectResponse("/admin?success=Cliente+actualizado", 303)
@@ -549,11 +750,14 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
     if len(prompt) > 20_000:
         return JSONResponse({"error": "El mensaje supera el máximo de 20.000 caracteres."}, 400)
 
-    model = str(body.get("model") or "")
-    if model not in MODEL_IDS:
-        model = get_settings(db).default_model
-    if model not in MODEL_IDS:
-        model = "claude-sonnet-4-6"
+    requested_model = str(body.get("model") or "")
+    if requested_model in MODEL_IDS and requested_model not in allowed_model_ids(user):
+        return JSONResponse(
+            {"error": "Ese modelo avanzado requiere el plan Premium.", "upgrade_required": True},
+            403,
+        )
+    model = choose_allowed_model(user, requested_model, get_settings(db).default_model)
+    artifact_kind = requested_kind(prompt)
 
     conversation = None
     raw_conversation_id = body.get("conversation_id")
@@ -598,11 +802,19 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
         .limit(29)
         .all()
     )
-    provider_messages = [
+    provider_messages = [{
+        "role": "system",
+        "content": (
+            "Eres Nexia, una asistente profesional y rigurosa. Analiza internamente antes de responder, "
+            "pero no reveles razonamientos privados paso a paso. Entrega conclusiones claras, supuestos y "
+            "pasos verificables. Cuando el usuario pida un archivo, genera el contenido completo y válido; "
+            "Nexia convertirá tu respuesta en un archivo descargable. Nunca digas que no puedes adjuntar archivos."
+        ),
+    }, *[
         {"role": item.role, "content": item.content}
         for item in reversed(previous)
         if item.content
-    ]
+    ]]
     provider_messages.append({"role": "user", "content": prompt})
 
     db.add(
@@ -669,18 +881,39 @@ async def api_chat(request: Request, db: Session = Depends(get_db)):
             yield _sse_error("El proveedor no devolvió contenido.")
             return
 
+        artifact = None
+        if artifact_kind:
+            try:
+                built = build_artifact(artifact_kind, answer)
+                if built:
+                    artifact = Artifact(
+                        user_id=user.id,
+                        conversation_id=conversation_id,
+                        filename=built.filename,
+                        mime_type=built.mime_type,
+                        size=len(built.data),
+                        data=built.data,
+                    )
+                    db.add(artifact)
+                    db.flush()
+            except Exception:
+                # La respuesta de texto sigue siendo útil si una librería de exportación falla.
+                artifact = None
         db.add(
             Message(
                 user_id=user.id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=answer,
+                artifact_id=artifact.id if artifact else None,
             )
         )
         saved_conversation = db.get(Conversation, conversation_id)
         if saved_conversation:
             saved_conversation.updated_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
         db.commit()
+        if artifact:
+            yield f"data: {json.dumps({'artifact': {'id': artifact.id, 'filename': artifact.filename, 'size': artifact.size, 'url': f'/api/artifacts/{artifact.id}/download'}})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -701,10 +934,179 @@ def _sse_error(message: str) -> str:
     return f"data: {json.dumps({'error': message})}\n\n"
 
 
+@app.get("/api/artifacts/{artifact_id}/download")
+def download_artifact(
+    artifact_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db)
+    artifact = (
+        db.query(Artifact)
+        .filter(Artifact.id == artifact_id, Artifact.user_id == user.id)
+        .one_or_none()
+    )
+    if artifact is None:
+        raise HTTPException(404, "Archivo no encontrado")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "-", artifact.filename) or "archivo-nexia"
+    return Response(
+        content=artifact.data,
+        media_type=artifact.mime_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Content-Length": str(artifact.size),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _client_token_user(request: Request, db: Session) -> User:
+    authorization = request.headers.get("Authorization", "")
+    raw = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if not raw:
+        raw = request.headers.get("X-Api-Key", "").strip()
+    if not raw.startswith("nxa_"):
+        raise HTTPException(401, "Token Nexia ausente o inválido")
+    user = db.query(User).filter(User.client_token_hash == hash_client_token(raw)).one_or_none()
+    if user is None or not user.email_verified:
+        raise HTTPException(401, "Token Nexia ausente o inválido")
+    return user
+
+
+async def _external_completion(
+    access,
+    model: str,
+    messages: list[dict],
+    tools: list[dict],
+    max_tokens: int | None,
+) -> tuple[dict | None, str | None]:
+    payload: dict = {"model": model, "messages": messages, "stream": False}
+    if tools:
+        payload["tools"] = tools
+    if max_tokens:
+        payload["max_tokens"] = max(1, min(int(max_tokens), 32_000))
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+            response = await client.post(
+                f"{access.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {access.api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        return None, f"No se pudo contactar con el proveedor: {exc}"
+    if response.status_code >= 400:
+        return None, f"El proveedor respondió {response.status_code}: {response.text[:300]}"
+    try:
+        return response.json(), None
+    except ValueError:
+        return None, "El proveedor devolvió una respuesta inválida."
+
+
+def _validate_external_model(user: User, requested: str) -> str:
+    if requested not in MODEL_IDS:
+        raise HTTPException(400, "Modelo no disponible en Nexia")
+    if requested not in allowed_model_ids(user):
+        raise HTTPException(403, "Ese modelo requiere el plan Premium")
+    return requested
+
+
+@app.get("/v1/models")
+def external_models(request: Request, db: Session = Depends(get_db)):
+    user = _client_token_user(request, db)
+    return {
+        "object": "list",
+        "data": [
+            {"id": model["id"], "object": "model", "owned_by": "nexia"}
+            for model in models_for_user(user)
+            if model["allowed"]
+        ],
+    }
+
+
+@app.post("/v1/responses")
+async def codex_responses(request: Request, db: Session = Depends(get_db)):
+    user = _client_token_user(request, db)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(400, "JSON inválido")
+    model = _validate_external_model(user, str(body.get("model") or ""))
+    messages, tools = responses_to_chat(body)
+    if not messages:
+        raise HTTPException(400, "El campo input está vacío")
+    access = consume(db, user, model)
+    if not access.allowed:
+        raise HTTPException(402, access.reason)
+    payload, error = await _external_completion(
+        access,
+        model,
+        messages,
+        tools,
+        body.get("max_output_tokens"),
+    )
+    if error or payload is None:
+        refund(db, user, access)
+        raise HTTPException(502, error or "El proveedor no respondió")
+    response = chat_to_response(payload, model)
+    if body.get("stream"):
+        return StreamingResponse(
+            responses_sse(response),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return response
+
+
+@app.post("/api/anthropic/v1/messages")
+async def anthropic_messages(request: Request, db: Session = Depends(get_db)):
+    user = _client_token_user(request, db)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(400, "JSON inválido")
+    model = _validate_external_model(user, str(body.get("model") or ""))
+    messages, tools = anthropic_to_chat(body)
+    if not messages:
+        raise HTTPException(400, "El campo messages está vacío")
+    access = consume(db, user, model)
+    if not access.allowed:
+        raise HTTPException(402, access.reason)
+    payload, error = await _external_completion(
+        access,
+        model,
+        messages,
+        tools,
+        body.get("max_tokens"),
+    )
+    if error or payload is None:
+        refund(db, user, access)
+        raise HTTPException(502, error or "El proveedor no respondió")
+    message = chat_to_anthropic(payload, model)
+    if body.get("stream"):
+        return StreamingResponse(
+            anthropic_sse(message),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return message
+
+
+@app.post("/api/anthropic/v1/messages/count_tokens")
+async def anthropic_count_tokens(request: Request, db: Session = Depends(get_db)):
+    _client_token_user(request, db)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(400, "JSON inválido")
+    messages, _tools = anthropic_to_chat(body)
+    characters = sum(len(str(message.get("content") or "")) for message in messages)
+    return {"input_tokens": max(1, (characters + 3) // 4)}
+
+
 @app.get("/healthz")
 def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "2.0.0"),
+        "version": os.environ.get("APP_VERSION", "3.0.0"),
     }

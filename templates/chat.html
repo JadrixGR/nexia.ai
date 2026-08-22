@@ -48,14 +48,14 @@
           <span id="sidebar-progress" style="width: {{ (status.messages_left / status.daily_message_limit * 100) if status.daily_message_limit else 0 }}%"></span>
           {% endif %}
         </div>
-        <a href="/cuenta">Ver consumo <span>→</span></a>
+        <a href="/configuracion">Ver consumo <span>→</span></a>
       </div>
       <div class="profile-mini">
         <div class="profile-avatar">
           {% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="" referrerpolicy="no-referrer" />
           {% else %}{{ (user.name or user.email)[0]|upper }}{% endif %}
         </div>
-        <a href="/cuenta">
+        <a href="/configuracion">
           <b>{{ user.name or user.email.split('@')[0] }}</b>
           <span>{{ user.email }}</span>
         </a>
@@ -74,16 +74,13 @@
         <h1 id="current-title">{{ selected.title if selected else 'Nueva conversación' }}</h1>
       </div>
       <div class="chat-tools">
-        <select id="model" aria-label="Modelo de inteligencia artificial">
-          {% for id, label in models %}
-          <option value="{{ id }}" {% if selected and selected.model == id %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <a class="balance-pill" id="usage" href="/cuenta">
+        <span class="plan-pill {{ status.plan }}">{{ status.plan_label }}</span>
+        <a class="balance-pill" id="usage" href="/configuracion">
           <i></i>
           {% if status.mode == 'credits' %}{{ status.credits_left }} créditos
           {% else %}{{ status.messages_left }} mensajes hoy{% endif %}
         </a>
+        <button class="icon-button theme-toggle" data-theme-toggle type="button"><span class="theme-sun">☀</span><span class="theme-moon">☾</span></button>
         {% if user.is_admin %}<a class="icon-button admin-shortcut" href="/admin" title="Administración">⚙</a>{% endif %}
       </div>
     </header>
@@ -111,6 +108,12 @@
         <div class="message-content">
           <span class="message-author">{{ 'Nexia' if message.role == 'assistant' else 'Tú' }}</span>
           <p>{{ message.content }}</p>
+          {% if message.artifact_id and artifacts.get(message.artifact_id) %}
+          {% set artifact = artifacts.get(message.artifact_id) %}
+          <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
+            <span>↓</span><div><b>{{ artifact.filename }}</b><small>{{ (artifact.size / 1024)|round(1) }} KB · listo para descargar</small></div><em>Descargar</em>
+          </a>
+          {% endif %}
         </div>
       </article>
       {% endfor %}
@@ -119,9 +122,20 @@
     <footer class="chat-composer-wrap">
       <div class="chat-composer">
         <textarea id="input" rows="1" maxlength="20000" placeholder="Escribe un mensaje a Nexia..." aria-label="Mensaje"></textarea>
-        <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
+        <div class="composer-bottom">
+          <div class="composer-controls">
+            <span class="composer-plus" title="Nexia puede crear archivos">＋</span>
+            <select id="model" aria-label="Modelo de inteligencia artificial">
+              {% for model in models %}
+              <option value="{{ model.id }}" {% if active_model == model.id %}selected{% endif %} {% if not model.allowed %}disabled{% endif %}>{{ model.label }}{% if not model.allowed %} · Premium 🔒{% endif %}</option>
+              {% endfor %}
+            </select>
+            <span class="reasoning-badge">✦ Razonamiento</span>
+          </div>
+          <button class="send-button" id="send" type="button" aria-label="Enviar mensaje">↑</button>
+        </div>
       </div>
-      <p>Nexia puede cometer errores. Verifica la información importante.</p>
+      <p>Pide ZIP, PDF, Excel, Word o HTML y Nexia te entregará un archivo descargable.</p>
     </footer>
   </main>
 </div>
@@ -173,6 +187,24 @@
     thread.appendChild(article);
     scrollToEnd();
     return { article, paragraph };
+  }
+
+  function addArtifact(target, artifact) {
+    const link = document.createElement("a");
+    link.className = "artifact-card";
+    link.href = artifact.url;
+    const icon = document.createElement("span");
+    icon.textContent = "↓";
+    const info = document.createElement("div");
+    const name = document.createElement("b");
+    name.textContent = artifact.filename;
+    const size = document.createElement("small");
+    size.textContent = Math.max(1, artifact.size / 1024).toFixed(1) + " KB · listo para descargar";
+    info.append(name, size);
+    const action = document.createElement("em");
+    action.textContent = "Descargar";
+    link.append(icon, info, action);
+    target.article.querySelector(".message-content").appendChild(link);
   }
 
   function addConversationToSidebar(id, title) {
@@ -277,6 +309,10 @@
             target.paragraph.textContent = chunk.error;
             target.article.classList.add("error-message");
             return;
+          }
+          if (chunk.artifact) {
+            addArtifact(target, chunk.artifact);
+            continue;
           }
           answer += chunk.delta || "";
           target.article.classList.remove("loading");

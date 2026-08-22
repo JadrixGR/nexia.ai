@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -65,6 +66,17 @@ class User(Base):
     credits: Mapped[int] = mapped_column(Integer, default=0)
     credits_used: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    plan: Mapped[str] = mapped_column(String(20), default="free")
+    plan_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    plan_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    client_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_token_prefix: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    client_token_created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Conversation(Base):
@@ -120,6 +132,26 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    filename: Mapped[str] = mapped_column(String(180))
+    mime_type: Mapped[str] = mapped_column(String(120))
+    size: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -146,6 +178,18 @@ def _add_missing_columns() -> None:
             "auth_provider": "VARCHAR(20) DEFAULT 'local' NOT NULL",
             "google_sub": "VARCHAR(255)",
             "avatar_url": "TEXT",
+            # Las cuentas creadas antes de esta función ya usaban correo o Google.
+            "email_verified": "BOOLEAN DEFAULT TRUE NOT NULL",
+            "verification_code_hash": "VARCHAR(64)",
+            "verification_expires_at": "TIMESTAMP",
+            "verification_sent_at": "TIMESTAMP",
+            "verification_attempts": "INTEGER DEFAULT 0 NOT NULL",
+            "plan": "VARCHAR(20) DEFAULT 'free' NOT NULL",
+            "plan_started_at": "TIMESTAMP",
+            "plan_expires_at": "TIMESTAMP",
+            "client_token_hash": "VARCHAR(64)",
+            "client_token_prefix": "VARCHAR(20)",
+            "client_token_created_at": "TIMESTAMP",
         }
         with engine.begin() as connection:
             for name, sql_type in user_additions.items():
@@ -161,6 +205,9 @@ def _add_missing_columns() -> None:
                 connection.execute(
                     text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)")
                 )
+        if "artifact_id" not in message_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE messages ADD COLUMN artifact_id INTEGER"))
 
 
 def _adopt_legacy_messages() -> None:
@@ -233,8 +280,10 @@ def init_db() -> None:
                         auth_provider="local",
                         is_admin=True,
                         is_active=False,
+                        email_verified=True,
                     )
                 )
             else:
                 user.is_admin = True
+                user.email_verified = True
             db.commit()

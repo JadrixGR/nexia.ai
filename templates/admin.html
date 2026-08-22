@@ -76,6 +76,7 @@
             <span class="status-tag {{ 'active' if row.status.is_active else 'trial' }}">
               {{ 'Activo' if row.status.is_active else 'Prueba' }}
             </span>
+            <span class="status-tag {{ 'active' if row.status.plan == 'premium' else 'trial' }}">{{ row.status.plan_label }}{% if row.status.days_left %} · {{ row.status.days_left }}d{% endif %}</span>
           </div>
           <p>{{ row.user.email }}</p>
         </div>
@@ -96,6 +97,14 @@
         <div class="form-field credits-field">
           <label for="credits-{{ row.user.id }}">Añadir créditos</label>
           <input id="credits-{{ row.user.id }}" name="add_credits" type="number" min="0" value="0" />
+        </div>
+        <div class="form-field plan-field">
+          <label for="plan-{{ row.user.id }}">Plan</label>
+          <select id="plan-{{ row.user.id }}" name="plan"><option value="free" {% if row.status.plan == 'free' %}selected{% endif %}>Gratuito</option><option value="premium" {% if row.status.plan == 'premium' %}selected{% endif %}>Premium</option></select>
+        </div>
+        <div class="form-field days-field">
+          <label for="days-{{ row.user.id }}">Añadir días Premium</label>
+          <input id="days-{{ row.user.id }}" name="premium_days" type="number" min="0" max="3650" value="0" />
         </div>
         <div class="form-field notes-field">
           <label for="notes-{{ row.user.id }}">Nota interna</label>

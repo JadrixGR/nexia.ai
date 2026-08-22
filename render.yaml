@@ -32,6 +32,28 @@ services:
         sync: false
       - key: APP_BASE_URL
         sync: false
+      # Recomendado en Render Free: Resend usa HTTPS, no los puertos SMTP bloqueados.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      # Alternativa para un servicio Render de pago. Gmail: smtp.gmail.com:587.
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Nexia AI
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: DEBUG_VERIFICATION_CODES
+        value: "false"
       - key: COOKIE_SECURE
         value: "true"
       # Base de datos PostgreSQL gestionada por Render.

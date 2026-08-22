@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Verifica tu correo · Nexia AI{% endblock %}
+{% block body_class %}verify-page{% endblock %}
+{% block body %}
+<main class="verify-shell">
+  <a class="brand" href="/"><span class="brand-mark">N</span><span>Nexia <b>AI</b></span></a>
+  <section class="verify-card">
+    <div class="verify-icon">✉</div>
+    <p class="dashboard-kicker">SEGURIDAD DE CUENTA</p>
+    <h1>Revisa tu correo</h1>
+    <p>Enviamos un código de 6 dígitos a <strong>{{ user.email }}</strong>. Caduca en 10 minutos.</p>
+    {% if message %}<div class="alert {{ 'alert-success' if sent else 'alert-error' }}">{{ message }}</div>{% endif %}
+    {% if dev_code %}<div class="dev-code">Código local: <strong>{{ dev_code }}</strong></div>{% endif %}
+    <form method="post" action="/auth/verify" class="verify-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label for="verification-code">Código de verificación</label>
+      <input id="verification-code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus />
+      <button class="btn btn-primary btn-full" type="submit">Verificar mi cuenta</button>
+    </form>
+    <form method="post" action="/auth/resend" class="resend-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit">Enviar un código nuevo</button>
+    </form>
+    <a class="verify-exit" href="/logout">Usar otra cuenta</a>
+  </section>
+</main>
+{% endblock %}

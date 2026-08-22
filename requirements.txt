@@ -9,3 +9,6 @@ httpx==0.28.1
 bcrypt==4.2.1
 itsdangerous==2.2.0
 cryptography==44.0.0
+reportlab==4.2.5
+python-docx==1.1.2
+openpyxl==3.1.5

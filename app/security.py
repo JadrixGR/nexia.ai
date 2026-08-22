@@ -5,6 +5,7 @@ import base64
 import hashlib
 import os
 import secrets
+import hmac
 
 import bcrypt
 from cryptography.fernet import Fernet, InvalidToken
@@ -95,3 +96,25 @@ def decrypt_api_key(value: str | None) -> str:
 
 def is_encrypted_api_key(value: str) -> bool:
     return value.startswith("gAAAA")
+
+
+def hash_verification_code(user_id: int, code: str) -> str:
+    payload = f"verify:{user_id}:{code}".encode("utf-8")
+    return hmac.new(SECRET_KEY.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def verify_verification_code(user_id: int, code: str, expected_hash: str | None) -> bool:
+    if not expected_hash:
+        return False
+    return hmac.compare_digest(hash_verification_code(user_id, code), expected_hash)
+
+
+def generate_client_token() -> tuple[str, str, str]:
+    """Devuelve el token visible una vez, su hash y un prefijo identificable."""
+    raw = "nxa_" + secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return raw, digest, raw[:12]
+
+
+def hash_client_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()

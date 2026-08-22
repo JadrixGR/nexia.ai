@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .models import DailyUsage, Setting, UsageEvent, User
 from .security import decrypt_api_key
+from .plans import allowed_model_ids, days_left, effective_plan
 
 CHAT_COST = 1
 
@@ -68,6 +69,13 @@ def account_status(db: Session, user: User) -> dict:
         "messages_left": max(settings.daily_message_limit - row.messages_used, 0),
         "daily_message_limit": settings.daily_message_limit,
         "messages_today": row.messages_used,
+        "email_verified": bool(user.email_verified),
+        "plan": effective_plan(user),
+        "plan_label": "Premium" if effective_plan(user) == "premium" else "Gratuito",
+        "plan_expires_at": user.plan_expires_at,
+        "days_left": days_left(user),
+        "allowed_models": sorted(allowed_model_ids(user)),
+        "client_token_prefix": user.client_token_prefix,
     }
 
 

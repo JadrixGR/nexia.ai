@@ -1,102 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Mi cuenta y consumo · Nexia AI{% endblock %}
-{% block body_class %}dashboard-page{% endblock %}
+{% block title %}Configuración · Nexia AI{% endblock %}
+{% block body_class %}dashboard-page settings-page{% endblock %}
 {% block body %}
-<header class="dashboard-nav">
-  <a class="brand brand-light" href="/">
-    <span class="brand-mark">N</span><span>Nexia <b>AI</b></span>
-  </a>
+<header class="dashboard-nav warm-nav">
+  <a class="brand" href="/"><span class="brand-mark">N</span><span>Nexia <b>AI</b></span></a>
   <nav>
     <a href="/chat">Chats</a>
     {% if user.is_admin %}<a href="/admin">Administración</a>{% endif %}
+    <button class="theme-toggle" data-theme-toggle type="button"><span class="theme-sun">☀</span><span class="theme-moon">☾</span></button>
     <a href="/logout">Salir</a>
   </nav>
 </header>
 
-<main class="dashboard-shell">
-  <div class="dashboard-heading">
-    <div>
-      <p class="dashboard-kicker">MI CUENTA</p>
-      <h1>Consumo y créditos</h1>
-      <p>Tu actividad de Nexia, clara y actualizada.</p>
-    </div>
-    <a class="btn btn-primary" href="/chat">Volver al chat <span>→</span></a>
-  </div>
+<main class="settings-shell">
+  <aside class="settings-nav">
+    <p>Configuración</p>
+    <a href="#cuenta">Mi cuenta</a>
+    <a href="#plan">Plan y facturación</a>
+    <a href="#consumo">Consumo</a>
+    <a href="#integraciones">Claude Code y Codex</a>
+  </aside>
 
-  {% if status.mode == 'credits' %}
-  <section class="balance-hero">
-    <div>
-      <p>CRÉDITOS DISPONIBLES</p>
-      <strong>{{ status.credits_left }}</strong>
-      <span>de {{ status.credits }} asignados</span>
-    </div>
-    <div class="balance-chart" style="--used: {{ status.credit_used_percent }}%">
-      <div><b>{{ 100 - status.credit_used_percent }}%</b><span>disponible</span></div>
-    </div>
-  </section>
-  {% else %}
-  <section class="balance-hero trial">
-    <div>
-      <p>PRUEBA GRATUITA DE HOY</p>
-      <strong>{{ status.messages_left }}</strong>
-      <span>mensajes disponibles de {{ status.daily_message_limit }}</span>
-    </div>
-    <div class="trial-status">
-      <span>Cuenta pendiente de activación</span>
-      <p>Cuando el administrador asigne tu clave y créditos, aquí verás tu saldo completo.</p>
-    </div>
-  </section>
-  {% endif %}
+  <div class="settings-content">
+    <header class="settings-heading">
+      <div><p class="dashboard-kicker">ESPACIO PERSONAL</p><h1>Configuración</h1><p>Tu cuenta, plan, consumo e integraciones en un solo lugar.</p></div>
+      <a class="btn btn-primary" href="/chat">Volver al chat <span>→</span></a>
+    </header>
 
-  <section class="metric-grid">
-    <article>
-      <span class="metric-icon">↗</span>
-      <p>Créditos usados</p>
-      <strong>{{ status.credits_used }}</strong>
-      <small>Cada respuesta consume 1 crédito</small>
-    </article>
-    <article>
-      <span class="metric-icon">◇</span>
-      <p>Conversaciones</p>
-      <strong>{{ conversation_count }}</strong>
-      <small>Chats guardados en tu cuenta</small>
-    </article>
-    <article>
-      <span class="metric-icon">◷</span>
-      <p>Solicitudes hoy</p>
-      <strong>{{ status.messages_today }}</strong>
-      <small>Incluye prueba y plan de créditos</small>
-    </article>
-  </section>
+    <section class="settings-section" id="cuenta">
+      <div class="section-title"><div><span>01</span><h2>Mi cuenta</h2></div><p>Identidad y acceso</p></div>
+      <div class="settings-card account-profile-card">
+        <div class="profile-avatar large">{% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="" referrerpolicy="no-referrer" />{% else %}{{ (user.name or user.email)[0]|upper }}{% endif %}</div>
+        <div><h3>{{ user.name or user.email.split('@')[0] }}</h3><p>{{ user.email }}</p><div class="account-badges"><span class="status-tag active">✓ Correo verificado</span><span class="status-tag">{{ 'Google' if 'google' in user.auth_provider else 'Correo y contraseña' }}</span></div></div>
+      </div>
+    </section>
 
-  <section class="activity-card">
-    <div class="activity-head">
-      <div><p class="dashboard-kicker">ACTIVIDAD</p><h2>Consumo reciente</h2></div>
-      <span>Últimas 30 solicitudes</span>
-    </div>
-    <div class="activity-table-wrap">
-      <table class="activity-table">
-        <thead><tr><th>Fecha</th><th>Modelo</th><th>Modalidad</th><th>Consumo</th></tr></thead>
-        <tbody>
-          {% for event in events %}
-          <tr>
-            <td>{{ event.created_at.strftime('%d/%m/%Y · %H:%M') if event.created_at else '—' }}</td>
-            <td><span class="model-dot"></span>{{ event.model }}</td>
-            <td><span class="status-tag {{ event.mode }}">{{ 'Créditos' if event.mode == 'credits' else 'Prueba' }}</span></td>
-            <td>{{ '1 crédito' if event.mode == 'credits' else 'Incluido' }}</td>
-          </tr>
+    <section class="settings-section" id="plan">
+      <div class="section-title"><div><span>02</span><h2>Plan y facturación</h2></div><p>Estado de tu suscripción</p></div>
+      <div class="plan-grid">
+        <article class="settings-card plan-card {{ status.plan }}">
+          <div class="plan-card-top"><div><span>PLAN ACTUAL</span><h3>{{ status.plan_label }}</h3></div><b>{{ 'PRO' if status.plan == 'premium' else 'FREE' }}</b></div>
+          {% if status.plan == 'premium' %}
+          <p>Acceso a todos los modelos Claude, integraciones externas y generación de archivos.</p>
+          <div class="plan-expiry"><strong>{{ status.days_left if status.days_left is not none else '∞' }}</strong><span>días restantes<br>{% if status.plan_expires_at %}vence {{ status.plan_expires_at.strftime('%d/%m/%Y') }}{% else %}sin vencimiento definido{% endif %}</span></div>
           {% else %}
-          <tr><td colspan="4" class="table-empty">Todavía no hay consumo registrado.</td></tr>
+          <p>Acceso a Claude Haiku 4.5 y Claude Sonnet 4.6. Actualiza a Premium para desbloquear los modelos avanzados.</p>
+          <div class="plan-expiry"><strong>2</strong><span>modelos básicos<br>sin fecha de vencimiento</span></div>
+          {% endif %}
+        </article>
+        <article class="settings-card credit-card">
+          <span>CRÉDITOS DISPONIBLES</span>
+          <strong>{{ status.credits_left if status.mode == 'credits' else status.messages_left }}</strong>
+          <p>{% if status.mode == 'credits' %}de {{ status.credits }} créditos asignados{% else %}de {{ status.daily_message_limit }} mensajes gratuitos hoy{% endif %}</p>
+          <div class="progress-track"><span style="width: {% if status.mode == 'credits' %}{{ 100 - status.credit_used_percent }}{% else %}{{ (status.messages_left / status.daily_message_limit * 100) if status.daily_message_limit else 0 }}{% endif %}%"></span></div>
+          <small>La compra y renovación se gestiona con el administrador de Nexia.</small>
+        </article>
+      </div>
+      <div class="model-access settings-card">
+        <h3>Modelos incluidos</h3>
+        <div class="model-list-settings">
+          {% for model in models %}
+          <div class="model-row {{ 'locked' if not model.allowed else '' }}"><span>✦</span><b>{{ model.label }}</b><em>{{ 'Premium' if model.tier == 'premium' else 'Incluido' }}</em>{% if not model.allowed %}<i>Bloqueado</i>{% else %}<i>Disponible</i>{% endif %}</div>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+        </div>
+      </div>
+    </section>
 
-  <section class="account-details">
-    <div><p>Correo</p><strong>{{ user.email }}</strong></div>
-    <div><p>Acceso</p><strong>{{ 'Google y contraseña' if user.auth_provider == 'local+google' else ('Google' if user.auth_provider == 'google' else 'Correo y contraseña') }}</strong></div>
-    <div><p>Estado de API</p><strong>{{ 'Activa' if status.is_active else 'Pendiente' }}</strong></div>
-  </section>
+    <section class="settings-section" id="consumo">
+      <div class="section-title"><div><span>03</span><h2>Consumo</h2></div><p>Actividad reciente</p></div>
+      <div class="metric-grid settings-metrics">
+        <article><p>Créditos usados</p><strong>{{ status.credits_used }}</strong><small>1 crédito por respuesta</small></article>
+        <article><p>Conversaciones</p><strong>{{ conversation_count }}</strong><small>Chats guardados</small></article>
+        <article><p>Archivos creados</p><strong>{{ artifact_count }}</strong><small>ZIP, PDF, Excel, Word y HTML</small></article>
+      </div>
+      <div class="settings-card activity-card">
+        <div class="activity-head"><h3>Últimas solicitudes</h3><span>Hasta 30 registros</span></div>
+        <div class="activity-table-wrap"><table class="activity-table"><thead><tr><th>Fecha</th><th>Modelo</th><th>Modalidad</th></tr></thead><tbody>
+          {% for event in events %}<tr><td>{{ event.created_at.strftime('%d/%m/%Y · %H:%M') if event.created_at else '—' }}</td><td>{{ event.model }}</td><td><span class="status-tag {{ event.mode }}">{{ 'Créditos' if event.mode == 'credits' else 'Incluido' }}</span></td></tr>
+          {% else %}<tr><td colspan="3" class="table-empty">Todavía no hay consumo registrado.</td></tr>{% endfor %}
+        </tbody></table></div>
+      </div>
+    </section>
+
+    <section class="settings-section" id="integraciones">
+      <div class="section-title"><div><span>04</span><h2>Claude Code y Codex</h2></div><p>Trabaja desde tu terminal</p></div>
+      <div class="integration-intro settings-card">
+        <div><span class="integration-icon">⌁</span></div>
+        <div><h3>Token personal de Nexia</h3><p>Usa el mismo saldo y los modelos permitidos por tu plan. El token completo se muestra una sola vez; guárdalo como una contraseña.</p>
+          {% if status.client_token_prefix %}<code>{{ status.client_token_prefix }}••••••••••••••••••••</code><small>Creado {{ user.client_token_created_at.strftime('%d/%m/%Y') if user.client_token_created_at else '' }}</small>{% else %}<span class="no-token">Todavía no generaste un token.</span>{% endif %}
+        </div>
+        <div class="token-actions">
+          <form method="post" action="/configuracion/token" onsubmit="return confirm('El token anterior dejará de funcionar. ¿Continuar?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="btn btn-primary" type="submit">{{ 'Rotar token' if status.client_token_prefix else 'Generar token' }}</button></form>
+          {% if status.client_token_prefix %}<form method="post" action="/configuracion/token/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="btn btn-quiet" type="submit">Revocar</button></form>{% endif %}
+        </div>
+      </div>
+      {% if new_client_token %}<div class="new-token-box"><p>GUÁRDALO AHORA — NO VOLVERÁ A MOSTRARSE</p><div><code id="new-token">{{ new_client_token }}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('new-token').textContent);this.textContent='Copiado'">Copiar</button></div></div>{% endif %}
+
+      <div class="integration-grid">
+        <article class="settings-card integration-card">
+          <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Formato Anthropic compatible</p></div></div>
+          <p>En PowerShell, configura estas variables antes de abrir Claude Code:</p>
+          <pre><code>$env:ANTHROPIC_BASE_URL="{{ public_base_url }}/api/anthropic"
+$env:ANTHROPIC_AUTH_TOKEN="TU_TOKEN_NEXIA"
+claude --model claude-sonnet-4-6</code></pre>
+          <small>Las herramientas dependen de que el proveedor compatible las procese correctamente.</small>
+        </article>
+        <article class="settings-card integration-card">
+          <div class="integration-card-head"><span>CX</span><div><h3>ChatGPT Codex</h3><p>Protocolo Responses compatible</p></div></div>
+          <p>Añade esto a <code>~/.codex/config.toml</code>:</p>
+          <pre><code>model = "claude-sonnet-4-6"
+model_provider = "nexia"
+
+[model_providers.nexia]
+name = "Nexia"
+base_url = "{{ public_base_url }}/v1"
+env_key = "NEXIA_API_KEY"
+wire_api = "responses"</code></pre>
+          <p>Después define <code>$env:NEXIA_API_KEY="TU_TOKEN_NEXIA"</code>.</p>
+        </article>
+      </div>
+    </section>
+  </div>
 </main>
 {% endblock %}

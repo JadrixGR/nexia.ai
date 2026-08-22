@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#090a0f" />
+    <meta name="theme-color" content="#f4efe7" />
     <title>{% block title %}Nexia AI · Tu inteligencia, bajo control{% endblock %}</title>
     <meta
       name="description"
@@ -12,12 +12,31 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Lora:wght@500;600&family=Manrope:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (() => {
+        const saved = localStorage.getItem("nexia-theme");
+        const theme = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body class="{% block body_class %}{% endblock %}">
     {% block body %}{% endblock %}
+    <script>
+      document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+        const refresh = () => button.setAttribute("aria-label", document.documentElement.dataset.theme === "dark" ? "Activar modo claro" : "Activar modo oscuro");
+        refresh();
+        button.addEventListener("click", () => {
+          const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem("nexia-theme", next);
+          refresh();
+        });
+      });
+    </script>
   </body>
 </html>
