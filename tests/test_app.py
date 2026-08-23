@@ -214,7 +214,10 @@ class NexiaFlowTests(unittest.TestCase):
         self.assertIn("claude --version", settings.text)
         self.assertIn("winget install Anthropic.ClaudeCode", settings.text)
         self.assertIn("claude no se reconoce", settings.text)
-        self.assertIn('Invoke-RestMethod "http://testserver/v1/models"', settings.text)
+        self.assertIn('$env:ANTHROPIC_BASE_URL="https://api.mwapi.dev/v1"', settings.text)
+        self.assertIn('Invoke-RestMethod "https://api.mwapi.dev/v1/models"', settings.text)
+        self.assertIn('ANTHROPIC_AUTH_TOKEN="TU_API_PERSONAL_SK"', settings.text)
+        self.assertIn("El token <code>nxa_...</code> no se utiliza en Claude Code", settings.text)
         self.assertNotIn("hostname-antiguo.onrender.com", settings.text)
         self.assertIn("wire_api = \"responses\"", settings.text)
         self.assertIn("requires_openai_auth = false", settings.text)
@@ -241,6 +244,55 @@ class NexiaFlowTests(unittest.TestCase):
         response = self.client.get("/api/provider-usage")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["reason"], "no_personal_api_key")
+
+    def test_client_can_explicitly_reveal_only_their_direct_provider_key(self):
+        user_id = self.register_and_verify()
+        self.activate(user_id)
+        page = self.client.get("/configuracion")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Tu API personal de Claude", page.text)
+        self.assertIn("TU_API_PERSONAL_SK", page.text)
+        self.assertNotIn("sk-test-client-key", page.text)
+
+        missing_csrf = self.client.post("/api/provider-key/reveal")
+        self.assertEqual(missing_csrf.status_code, 403)
+
+        revealed = self.client.post(
+            "/api/provider-key/reveal",
+            headers={"X-CSRF-Token": make_csrf(user_id)},
+        )
+        self.assertEqual(revealed.status_code, 200)
+        self.assertEqual(revealed.json()["api_key"], "sk-test-client-key")
+        self.assertEqual(revealed.json()["base_url"], "https://api.mwapi.dev/v1")
+        self.assertIn("no-store", revealed.headers["cache-control"])
+        self.assertEqual(revealed.headers["pragma"], "no-cache")
+
+    def test_client_without_personal_api_cannot_reveal_trial_key(self):
+        user_id = self.register_and_verify()
+        response = self.client.post(
+            "/api/provider-key/reveal",
+            headers={"X-CSRF-Token": make_csrf(user_id)},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn("api_key", response.json())
+
+    def test_each_client_receives_only_their_own_direct_provider_key(self):
+        first_id = self.register_and_verify("primero@example.com")
+        self.activate(first_id)
+        second_id = self.register_and_verify("segundo@example.com")
+        with SessionLocal() as db:
+            second = db.get(User, second_id)
+            second.api_key = encrypt_api_key("sk-second-client-key")
+            second.is_active = True
+            db.commit()
+
+        response = self.client.post(
+            "/api/provider-key/reveal",
+            headers={"X-CSRF-Token": make_csrf(second_id)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["api_key"], "sk-second-client-key")
+        self.assertNotIn("sk-test-client-key", response.text)
 
     def test_admin_rejects_invalid_provider_key_before_assigning_it(self):
         user_id = self.register_and_verify()

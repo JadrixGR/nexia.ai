@@ -1143,6 +1143,9 @@ html[data-theme="dark"] .chat-message.user .message-avatar { background: #3a3732
 .settings-metrics p, .settings-metrics small, .activity-head > span, .activity-table td { color: var(--muted); }
 .activity-table th, .activity-table td { border-color: var(--line); }
 .integration-intro { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 17px; padding: 22px; }
+.provider-key-access { border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); box-shadow: 0 8px 28px rgba(91, 68, 50, .07); }
+.provider-key-access #provider-key-value { max-width: 100%; overflow-wrap: anywhere; color: var(--violet); font-weight: 700; }
+.codex-token-card { margin-top: 12px; }
 .integration-icon { width: 44px; height: 44px; display: grid; place-items: center; color: white; background: var(--violet); border-radius: 12px; font-size: 21px; }
 .integration-intro h3 { margin: 0; font-size: 15px; }
 .integration-intro p { margin: 3px 0 9px; color: var(--muted); font-size: 10px; }
@@ -1150,6 +1153,7 @@ html[data-theme="dark"] .chat-message.user .message-avatar { background: #3a3732
 .integration-intro small { display: block; margin-top: 5px; color: var(--muted); font-size: 8px; }
 .no-token { color: var(--muted); font-size: 10px; }
 .token-actions { display: flex; gap: 7px; }
+.token-actions > button { white-space: nowrap; }
 .token-actions form { margin: 0; }
 .token-actions .btn { min-height: 38px; font-size: 10px; }
 .new-token-box { margin: 12px 0; padding: 17px; color: #fff; background: #315c47; border-radius: 13px; }

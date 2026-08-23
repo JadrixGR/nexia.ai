@@ -83,7 +83,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
-app = FastAPI(title="Nexia", version="3.3.2")
+app = FastAPI(title="Nexia", version="3.4.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -567,6 +567,7 @@ def account_page(request: Request, db: Session = Depends(get_db)):
     conversation_count = (
         db.query(Conversation).filter(Conversation.user_id == user.id).count()
     )
+    settings = get_settings(db)
     return templates.TemplateResponse(
         request,
         "account.html",
@@ -579,6 +580,7 @@ def account_page(request: Request, db: Session = Depends(get_db)):
             artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
             models=models_for_user(user),
             public_base_url=str(request.base_url).rstrip("/"),
+            provider_base_url=settings.api_base_url.rstrip("/"),
         ),
     )
 
@@ -597,6 +599,7 @@ def rotate_client_token(
     user.client_token_created_at = utcnow()
     db.commit()
     events = db.query(UsageEvent).filter(UsageEvent.user_id == user.id).order_by(UsageEvent.id.desc()).limit(30).all()
+    settings = get_settings(db)
     return templates.TemplateResponse(
         request,
         "account.html",
@@ -609,6 +612,7 @@ def rotate_client_token(
             artifact_count=db.query(Artifact).filter(Artifact.user_id == user.id).count(),
             models=models_for_user(user),
             public_base_url=str(request.base_url).rstrip("/"),
+            provider_base_url=settings.api_base_url.rstrip("/"),
             new_client_token=raw,
         ),
     )
@@ -781,6 +785,28 @@ async def api_provider_usage(request: Request, db: Session = Depends(get_db)):
         )
     result = await fetch_provider_usage(get_settings(db).api_base_url, provider_key)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/provider-key/reveal")
+def reveal_provider_key(request: Request, db: Session = Depends(get_db)):
+    """Entrega la clave personal solo a su dueño autenticado y bajo solicitud explícita."""
+    user = require_user(request, db)
+    require_csrf(request, user)
+    provider_key = decrypt_api_key(user.api_key)
+    if not provider_key:
+        raise HTTPException(404, "Tu cuenta todavía no tiene una API personal asignada.")
+    if not user.is_active:
+        raise HTTPException(403, "Tu API personal está desactivada.")
+    return JSONResponse(
+        {
+            "api_key": provider_key,
+            "base_url": get_settings(db).api_base_url.rstrip("/"),
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.post("/api/uploads")
@@ -1405,5 +1431,5 @@ def healthz():
     return {
         "ok": True,
         "app": "nexia",
-        "version": os.environ.get("APP_VERSION", "3.3.2"),
+        "version": os.environ.get("APP_VERSION", "3.4.0"),
     }

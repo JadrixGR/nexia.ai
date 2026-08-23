@@ -1,8 +1,8 @@
 # Nexia AI
 
 Plataforma SaaS multiusuario de IA construida con FastAPI. Incluye cuentas verificadas,
-planes Free/Premium, chats privados, saldo real de API, archivos descargables y acceso
-desde Claude Code o ChatGPT Codex mediante un token personal.
+planes Free/Premium, chats privados, saldo real de API, archivos descargables, conexión
+directa de la API personal con Claude Code y acceso a ChatGPT Codex mediante Nexia.
 
 ## Funciones
 
@@ -17,7 +17,8 @@ desde Claude Code o ChatGPT Codex mediante un token personal.
 - Estado temporal «Pensando…» con actividad de Analista, Creador y Revisor.
 - Ilustraciones vectoriales SVG creadas por Claude, sin una API de imágenes adicional.
 - Creación y descarga de ZIP, PDF, XLSX, DOCX y HTML desde el propio chat.
-- Token personal rotatorio para endpoints compatibles con Anthropic y OpenAI Responses.
+- Entrega autenticada de la API personal `sk-...` para conexión directa con Claude Code.
+- Token Nexia rotatorio para la integración compatible con OpenAI Responses de Codex.
 - Panel de configuración con cuenta, plan, facturación, días, saldo real e integraciones.
 - Panel administrativo para claves del proveedor, planes y vencimientos.
 - API keys cifradas; los tokens personales se guardan únicamente como hash SHA-256.
@@ -102,11 +103,13 @@ iconos y diagramas; no sustituye a un generador de fotografías.
 
 ## Claude Code y Codex
 
-Cada cliente genera su token `nxa_...` en **Configuración → Claude Code y Codex**.
-El token completo se muestra una sola vez.
+El administrador asigna una API personal `sk-...` a cada cliente. En
+**Configuración → Claude Code y Codex**, el dueño autenticado puede mostrarla o copiarla
+de forma explícita. La clave sigue cifrada en la base de datos, no se incluye en el HTML
+inicial y la respuesta que la revela usa `Cache-Control: no-store` y protección CSRF.
 
-- Anthropic compatible: base URL `https://tu-dominio.com/api/anthropic`.
-- OpenAI Responses compatible: base URL `https://tu-dominio.com/v1`.
+- Claude Code se conecta directamente a MWAPI con la API `sk-...` del cliente.
+- Codex continúa usando el token Nexia `nxa_...` y la API Responses de Nexia.
 
 Para Claude Code en PowerShell:
 
@@ -114,10 +117,10 @@ Para Claude Code en PowerShell:
 irm https://claude.ai/install.ps1 | iex
 $claudeDir = "$env:USERPROFILE\.local\bin"
 $env:Path = "$env:Path;$claudeDir"
-$env:ANTHROPIC_BASE_URL="https://tu-dominio.com/api/anthropic"
-$env:ANTHROPIC_AUTH_TOKEN="nxa_TU_TOKEN"
+$env:ANTHROPIC_BASE_URL="https://api.mwapi.dev/v1"
+$env:ANTHROPIC_AUTH_TOKEN="sk-TU_API_PERSONAL"
 $headers = @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" }
-Invoke-RestMethod "https://tu-dominio.com/v1/models" -Headers $headers
+Invoke-RestMethod "https://api.mwapi.dev/v1/models" -Headers $headers
 claude --model claude-sonnet-4-6
 ```
 
@@ -125,13 +128,14 @@ Si PowerShell indica que `claude` no se reconoce, comprueba
 `Test-Path "$env:USERPROFILE\.local\bin\claude.exe"`, añade esa carpeta al `PATH`
 del usuario o instala la alternativa oficial con `winget install Anthropic.ClaudeCode`.
 
-El cliente utiliza el token `nxa_...`, mientras que Nexia conserva y utiliza la clave
-MWAPI `sk-...` asignada por el administrador. Un error del proveedor como
-`API key does not exist` significa que la clave `sk-...` debe reemplazarse; no se corrige
-generando otro token `nxa_...`. Las instrucciones de Configuración utilizan el dominio
-actual de la página para evitar hostnames antiguos de Render.
+Las instrucciones usan el `API_BASE_URL` configurado por el administrador. Según la guía
+de MWAPI, Claude Code espera directamente `ANTHROPIC_AUTH_TOKEN=sk-...` y
+`ANTHROPIC_BASE_URL=https://api.mwapi.dev/v1`. El saldo mostrado en Nexia corresponde a
+esa misma clave. Como la terminal se conecta directamente al proveedor, los límites de
+modelos aplicados por Nexia no pueden imponerse sobre esas llamadas externas.
 
-Para Codex, define `NEXIA_API_KEY=nxa_TU_TOKEN` y registra Nexia en
+Para Codex, el cliente genera un token `nxa_...`, define
+`NEXIA_API_KEY=nxa_TU_TOKEN` y registra Nexia en
 `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
@@ -155,9 +159,10 @@ proveedor subyacente acepte herramientas en su formato compatible con OpenAI.
 La configuración muestra únicamente el balance o cuota real de la clave `sk-...`
 asignada al cliente, consultado desde el servidor mediante `GET {API_BASE_URL}/usage`.
 
-La clave MWAPI se descifra únicamente en el servidor y nunca se devuelve al navegador.
-Las cuentas gratuitas que usan una clave de prueba compartida no pueden consultar el
-saldo global de esa clave.
+La clave MWAPI se descifra para las llamadas del servidor y también puede ser solicitada
+explícitamente por su dueño autenticado para conectarla a Claude Code. Nunca se entrega
+la clave compartida de prueba. Las cuentas gratuitas que usan esa prueba tampoco pueden
+consultar su saldo global.
 
 ## Variables de entorno
 

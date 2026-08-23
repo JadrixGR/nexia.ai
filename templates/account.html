@@ -83,9 +83,17 @@
 
     <section class="settings-section" id="integraciones">
       <div class="section-title"><div><span>04</span><h2>Claude Code y Codex</h2></div><p>Trabaja desde tu terminal</p></div>
-      <div class="integration-intro settings-card">
+      <div class="integration-intro settings-card provider-key-access" id="provider-key-access" data-enabled="{{ 'true' if status.is_active and status.has_api_key else 'false' }}" data-csrf="{{ csrf_token }}">
         <div><span class="integration-icon">⌁</span></div>
-        <div><h3>Token personal de Nexia</h3><p>Usa el mismo saldo y los modelos permitidos por tu plan. El token completo se muestra una sola vez; guárdalo como una contraseña.</p>
+        <div><h3>Tu API personal de Claude</h3><p>Es la clave <code>sk-...</code> que el administrador asignó exclusivamente a tu cuenta. Su saldo real es el que aparece arriba y puedes conectarla directamente a Claude Code.</p>
+          {% if status.is_active and status.has_api_key %}<code id="provider-key-value">sk-••••••••••••••••••••••••••••</code><small id="provider-key-help">Oculta hasta que solicites verla. No aparecerá en el HTML ni se guardará en el navegador.</small>{% else %}<span class="no-token">Tu cuenta todavía no tiene una API personal activa.</span>{% endif %}
+        </div>
+        {% if status.is_active and status.has_api_key %}<div class="token-actions"><button class="btn btn-primary" id="reveal-provider-key" type="button">Mostrar API</button><button class="btn btn-quiet" id="copy-provider-key" type="button">Copiar API</button></div>{% endif %}
+      </div>
+
+      <div class="integration-intro settings-card codex-token-card">
+        <div><span class="integration-icon">CX</span></div>
+        <div><h3>Token Nexia para Codex</h3><p>Este token <code>nxa_...</code> es únicamente para pasar por la integración de Nexia con Codex. Claude Code usará directamente tu API <code>sk-...</code>.</p>
           {% if status.client_token_prefix %}<code>{{ status.client_token_prefix }}••••••••••••••••••••</code><small>Creado {{ user.client_token_created_at.strftime('%d/%m/%Y') if user.client_token_created_at else '' }}</small>{% else %}<span class="no-token">Todavía no generaste un token.</span>{% endif %}
         </div>
         <div class="token-actions">
@@ -97,11 +105,10 @@
 
       <div class="integration-grid">
         <article class="settings-card integration-card">
-          <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Formato Anthropic compatible</p></div></div>
-          <div class="integration-warning"><b>¿Aparece “claude no se reconoce”?</b><span>Significa que Claude Code no está instalado o que falta su carpeta en el PATH. Ejecuta completo el paso 2.</span></div>
-          <div class="integration-note"><b>Hay dos claves diferentes</b><span>Tú usas el token <code>nxa_...</code>. Nexia utiliza en el servidor la clave MWAPI <code>sk-...</code> asignada por el administrador. Si aparece “API key does not exist”, el administrador debe reemplazar esa clave MWAPI.</span></div>
+          <div class="integration-card-head"><span>CC</span><div><h3>Claude Code</h3><p>Conexión directa con tu API personal</p></div></div>
+          <div class="integration-warning"><b>¿Aparece “claude no se reconoce”?</b><span>Significa que Claude Code no está instalado o que falta su carpeta en el PATH. Ejecuta completo el paso 1.</span></div>
+          <div class="integration-note"><b>Ahora Claude Code usa directamente tu clave</b><span>La URL base es <code>{{ provider_base_url }}</code> y el token es la API personal <code>sk-...</code> mostrada arriba. El token <code>nxa_...</code> no se utiliza en Claude Code.</span></div>
           <ol class="setup-steps">
-            <li><b>Genera tu token Nexia</b><span>Usa el botón superior. El token empieza con <code>nxa_</code>.</span></li>
             <li><b>Instala y verifica Claude Code</b><span>Copia y ejecuta todo este bloque en PowerShell. Instala Claude Code, corrige el PATH y muestra la versión:</span></li>
           </ol>
           <div class="code-copy"><button type="button" data-copy-target="claude-install">Copiar</button><pre><code id="claude-install">irm https://claude.ai/install.ps1 | iex
@@ -114,23 +121,27 @@ if (($userPath -split ";") -notcontains $claudeDir) {
 claude --version</code></pre></div>
           <details class="persistent-config install-help"><summary>Si el instalador falla o sigue sin reconocer claude</summary><p>Comprueba si existe el ejecutable:</p><div class="code-copy"><button type="button" data-copy-target="claude-diagnose">Copiar</button><pre><code id="claude-diagnose">Test-Path "$env:USERPROFILE\.local\bin\claude.exe"
 & "$env:USERPROFILE\.local\bin\claude.exe" --version</code></pre></div><p>Si el primer comando devuelve <code>False</code>, instala la alternativa oficial con:</p><div class="code-copy"><button type="button" data-copy-target="claude-winget">Copiar</button><pre><code id="claude-winget">winget install Anthropic.ClaudeCode</code></pre></div></details>
-          <ol class="setup-steps" start="3">
-            <li><b>Conecta Claude Code con Nexia</b><span>En la carpeta de tu proyecto, abre PowerShell y ejecuta:</span></li>
+          <ol class="setup-steps" start="2">
+            <li><b>Conecta tu API personal</b><span>Pulsa “Copiar con mi API”; Nexia insertará tu clave <code>sk-...</code> en el bloque antes de copiarlo:</span></li>
           </ol>
-          <div class="code-copy"><button type="button" data-copy-target="claude-session">Copiar</button><pre><code id="claude-session">$env:ANTHROPIC_BASE_URL="{{ public_base_url }}/api/anthropic"
-$env:ANTHROPIC_AUTH_TOKEN="TU_TOKEN_NEXIA"
+          <div class="code-copy"><button type="button" data-secret-copy-target="claude-session">Copiar con mi API</button><pre><code id="claude-session">$env:ANTHROPIC_BASE_URL="{{ provider_base_url }}"
+$env:ANTHROPIC_AUTH_TOKEN="TU_API_PERSONAL_SK"
 $headers = @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" }
-Invoke-RestMethod "{{ public_base_url }}/v1/models" -Headers $headers
+Invoke-RestMethod "{{ provider_base_url }}/models" -Headers $headers
 claude --model claude-sonnet-4-6</code></pre>
           </div>
-          <details class="persistent-config"><summary>Guardar la conexión de forma permanente</summary><p>Crea o edita <code>%USERPROFILE%\.claude\settings.json</code>:</p><div class="code-copy"><button type="button" data-copy-target="claude-settings">Copiar</button><pre><code id="claude-settings">{
+          <details class="persistent-config"><summary>Guardar la conexión de forma permanente</summary><p>Crea o edita <code>%USERPROFILE%\.claude\settings.json</code>:</p><div class="code-copy"><button type="button" data-secret-copy-target="claude-settings">Copiar con mi API</button><pre><code id="claude-settings">{
   "env": {
-    "ANTHROPIC_BASE_URL": "{{ public_base_url }}/api/anthropic",
-    "ANTHROPIC_AUTH_TOKEN": "TU_TOKEN_NEXIA"
+    "ANTHROPIC_AUTH_TOKEN": "TU_API_PERSONAL_SK",
+    "ANTHROPIC_BASE_URL": "{{ provider_base_url }}",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "0"
   }
 }</code></pre></div></details>
-          <ol class="setup-steps" start="4"><li><b>Verifica la conexión</b><span>El paso anterior debe listar los modelos de Nexia antes de abrir Claude Code. Ya dentro, escribe <code>/status</code> y confirma que la URL base corresponde al mismo dominio donde abriste Nexia.</span></li></ol>
-          <small>El consumo hecho desde la terminal utiliza directamente el saldo real de la API asignada a tu cuenta. Las llamadas de herramientas requieren compatibilidad del modelo proveedor.</small>
+          <ol class="setup-steps" start="3"><li><b>Verifica la conexión</b><span>El comando debe listar los modelos de MWAPI antes de abrir Claude Code. Ya dentro, escribe <code>/status</code> y confirma que la URL base sea <code>{{ provider_base_url }}</code>.</span></li></ol>
+          <small>El consumo de la terminal se descontará directamente del mismo saldo real mostrado en Nexia. Al entregar la clave directa, los límites de modelos en terminal dependen del proveedor.</small>
         </article>
         <article class="settings-card integration-card">
           <div class="integration-card-head"><span>CX</span><div><h3>ChatGPT Codex</h3><p>Protocolo Responses compatible</p></div></div>
@@ -165,6 +176,68 @@ codex</code></pre></div>
 </main>
 <script>
   (() => {
+    const providerAccess = document.getElementById("provider-key-access");
+    const providerKeyValue = document.getElementById("provider-key-value");
+    const providerKeyHelp = document.getElementById("provider-key-help");
+    const revealProviderKey = document.getElementById("reveal-provider-key");
+    const copyProviderKey = document.getElementById("copy-provider-key");
+    let providerKey = "";
+    let providerKeyVisible = false;
+
+    const loadProviderKey = async () => {
+      if (providerKey) return providerKey;
+      if (!providerAccess || providerAccess.dataset.enabled !== "true") {
+        throw new Error("Tu cuenta no tiene una API personal activa.");
+      }
+      const response = await fetch("/api/provider-key/reveal", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "X-CSRF-Token": providerAccess.dataset.csrf,
+        },
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (!response.ok || !data.api_key) {
+        throw new Error(data.detail || "No se pudo obtener tu API personal.");
+      }
+      providerKey = data.api_key;
+      return providerKey;
+    };
+
+    const reportKeyError = (error) => {
+      if (providerKeyHelp) providerKeyHelp.textContent = error.message;
+    };
+
+    if (revealProviderKey) {
+      revealProviderKey.addEventListener("click", async () => {
+        try {
+          const key = await loadProviderKey();
+          providerKeyVisible = !providerKeyVisible;
+          providerKeyValue.textContent = providerKeyVisible ? key : "sk-••••••••••••••••••••••••••••";
+          revealProviderKey.textContent = providerKeyVisible ? "Ocultar API" : "Mostrar API";
+          providerKeyHelp.textContent = providerKeyVisible
+            ? "Visible solo en esta sesión. No la compartas en capturas ni repositorios."
+            : "API oculta. Puedes volver a mostrarla cuando la necesites.";
+        } catch (error) {
+          reportKeyError(error);
+        }
+      });
+    }
+
+    if (copyProviderKey) {
+      copyProviderKey.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(await loadProviderKey());
+          copyProviderKey.textContent = "API copiada";
+          providerKeyHelp.textContent = "Clave copiada. Pégala únicamente en la configuración de Claude Code.";
+          setTimeout(() => { copyProviderKey.textContent = "Copiar API"; }, 1400);
+        } catch (error) {
+          reportKeyError(error);
+        }
+      });
+    }
+
     document.querySelectorAll("[data-copy-target]").forEach((button) => {
       button.addEventListener("click", async () => {
         const target = document.getElementById(button.dataset.copyTarget);
@@ -173,6 +246,22 @@ codex</code></pre></div>
         const previous = button.textContent;
         button.textContent = "Copiado";
         setTimeout(() => { button.textContent = previous; }, 1400);
+      });
+    });
+
+    document.querySelectorAll("[data-secret-copy-target]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const target = document.getElementById(button.dataset.secretCopyTarget);
+        if (!target) return;
+        try {
+          const command = target.textContent.trim().replaceAll("TU_API_PERSONAL_SK", await loadProviderKey());
+          await navigator.clipboard.writeText(command);
+          const previous = button.textContent;
+          button.textContent = "Copiado con tu API";
+          setTimeout(() => { button.textContent = previous; }, 1400);
+        } catch (error) {
+          reportKeyError(error);
+        }
       });
     });
 
