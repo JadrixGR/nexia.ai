@@ -70,7 +70,7 @@ from .integrations import (
     responses_to_chat,
 )
 from .images import is_image_request
-from .provider_usage import fetch_provider_usage
+from .provider_usage import fetch_provider_usage, fetch_codex_usage
 from .uploads import MAX_UPLOAD_BYTES, extract_text, is_image, validate_upload
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -697,6 +697,7 @@ async def admin_client(
     request: Request,
     csrf_token: str = Form(...),
     api_key: str = Form(""),
+    codex_api_key: str = Form(""),
     plan: str = Form("free"),
     premium_days: int = Form(0),
     notes: str = Form(""),
@@ -712,10 +713,17 @@ async def admin_client(
     if action == "remove_key":
         client.api_key = None
         client.is_active = False
+    elif action == "remove_codex_key":
+        client.codex_api_key = None
+        client.codex_is_active = False
     elif action == "toggle_active":
         if not client.api_key:
             return RedirectResponse("/admin?error=Primero+asigna+una+clave+API+al+cliente", 303)
         client.is_active = not client.is_active
+    elif action == "toggle_codex_active":
+        if not client.codex_api_key:
+            return RedirectResponse("/admin?error=Primero+asigna+una+clave+Codex+al+cliente", 303)
+        client.codex_is_active = not client.codex_is_active
     elif action == "toggle_admin":
         if client.id == admin.id:
             return RedirectResponse("/admin?error=No+puedes+quitarte+tu+propio+acceso+admin", 303)
@@ -747,6 +755,12 @@ async def admin_client(
                 )
             client.api_key = encrypt_api_key(clean_key)
             client.is_active = True
+
+        clean_codex = codex_api_key.strip()
+        if clean_codex:
+            client.codex_api_key = encrypt_api_key(clean_codex)
+            client.codex_is_active = True
+
         if plan == "premium":
             had_active_premium = effective_plan(client) == "premium"
             start = client.plan_expires_at if client.plan_expires_at and client.plan_expires_at > utcnow() else utcnow()
@@ -802,6 +816,39 @@ def reveal_provider_key(request: Request, db: Session = Depends(get_db)):
             "api_key": provider_key,
             "base_url": get_settings(db).api_base_url.rstrip("/"),
         },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/api/codex-usage")
+async def api_codex_usage(request: Request, db: Session = Depends(get_db)):
+    """Saldo de tokens Codex; la clave se descifra y utiliza solo en el servidor."""
+    user = require_user(request, db)
+    codex_key = decrypt_api_key(user.codex_api_key)
+    if not user.codex_is_active or not codex_key:
+        return JSONResponse(
+            {"available": False, "reason": "no_codex_api_key"},
+            headers={"Cache-Control": "no-store"},
+        )
+    result = await fetch_codex_usage(codex_key)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/codex-key/reveal")
+def reveal_codex_key(request: Request, db: Session = Depends(get_db)):
+    """Entrega la clave Codex solo a su dueño autenticado y bajo solicitud explícita."""
+    user = require_user(request, db)
+    require_csrf(request, user)
+    codex_key = decrypt_api_key(user.codex_api_key)
+    if not codex_key:
+        raise HTTPException(404, "Tu cuenta todavía no tiene una API Codex asignada.")
+    if not user.codex_is_active:
+        raise HTTPException(403, "Tu API Codex está desactivada.")
+    return JSONResponse(
+        {"codex_key": codex_key},
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, private",
             "Pragma": "no-cache",

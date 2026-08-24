@@ -82,6 +82,60 @@ def normalize_provider_usage(raw: Any) -> dict[str, Any]:
     }
 
 
+async def fetch_codex_usage(codex_api_key: str) -> dict:
+    """Consulta el saldo de tokens de una clave Codex en nghimmo.com."""
+    if not codex_api_key:
+        return {"available": False, "reason": "no_codex_api_key"}
+    check_url = "https://api.nghimmo.com/check"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+            response = await client.get(
+                check_url,
+                headers={
+                    "Authorization": f"Bearer {codex_api_key}",
+                    "Accept": "application/json",
+                },
+            )
+    except httpx.HTTPError:
+        return {"available": False, "reason": "provider_unreachable"}
+    if response.status_code >= 400:
+        return {
+            "available": False,
+            "reason": "provider_rejected",
+            "provider_status": response.status_code,
+        }
+    try:
+        raw = response.json()
+    except ValueError:
+        return {"available": False, "reason": "invalid_provider_response"}
+
+    root = raw if isinstance(raw, dict) else {}
+    tokens_remaining = _first_number(
+        root.get("tokens_remaining"),
+        root.get("remaining_tokens"),
+        root.get("remaining"),
+        root.get("balance"),
+        root.get("quota_remaining"),
+    )
+    tokens_used = _first_number(
+        root.get("tokens_used"),
+        root.get("used_tokens"),
+        root.get("used"),
+    )
+    tokens_limit = _first_number(
+        root.get("tokens_limit"),
+        root.get("limit"),
+        root.get("quota_limit"),
+    )
+    return {
+        "available": True,
+        "tokens_remaining": int(tokens_remaining) if tokens_remaining is not None else None,
+        "tokens_used": int(tokens_used) if tokens_used is not None else None,
+        "tokens_limit": int(tokens_limit) if tokens_limit is not None else None,
+        "raw": root,
+    }
+
+
 async def fetch_provider_usage(base_url: str, api_key: str) -> dict[str, Any]:
     """Consulta MWAPI sin exponer la clave ni propagar detalles sensibles de errores."""
     if not api_key:

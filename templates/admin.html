@@ -74,14 +74,18 @@
             <h3>{{ row.user.name or row.user.email.split('@')[0] }}</h3>
             {% if row.user.is_admin %}<span class="status-tag admin">Admin</span>{% endif %}
             <span class="status-tag {{ 'active' if row.status.is_active else 'trial' }}">
-              {{ 'Activo' if row.status.is_active else 'Prueba' }}
+              CC: {{ 'Activo' if row.status.is_active else 'Inactivo' }}
+            </span>
+            <span class="status-tag {{ 'active' if row.status.codex_is_active else 'trial' }}">
+              Codex: {{ 'Activo' if row.status.codex_is_active else 'Inactivo' }}
             </span>
             <span class="status-tag {{ 'active' if row.status.plan == 'premium' else 'trial' }}">{{ row.status.plan_label }}{% if row.status.days_left %} · {{ row.status.days_left }}d{% endif %}</span>
           </div>
           <p>{{ row.user.email }}</p>
         </div>
         <div class="client-metrics">
-          <div><span>API</span><b>{{ 'Activa' if row.status.is_active else 'Sin activar' }}</b></div>
+          <div><span>CC</span><b>{{ 'Activa' if row.status.is_active else 'Sin activar' }}</b></div>
+          <div><span>Codex</span><b>{{ 'Activo' if row.status.codex_is_active else 'Sin activar' }}</b></div>
           <div><span>Hoy</span><b>{{ row.status.messages_today }}</b></div>
           <div><span>Plan</span><b>{{ row.status.plan_label }}</b></div>
         </div>
@@ -90,9 +94,14 @@
       <form method="post" action="/admin/client/{{ row.user.id }}" class="client-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-field api-key-field">
-          <label for="key-{{ row.user.id }}">Clave API del cliente</label>
+          <label for="key-{{ row.user.id }}">Clave API Claude Code</label>
           <input id="key-{{ row.user.id }}" name="api_key" type="password" autocomplete="off"
             placeholder="{% if row.status.has_api_key %}Clave cifrada y configurada{% else %}sk-...{% endif %}" />
+        </div>
+        <div class="form-field api-key-field">
+          <label for="codex-{{ row.user.id }}">Clave API Codex</label>
+          <input id="codex-{{ row.user.id }}" name="codex_api_key" type="password" autocomplete="off"
+            placeholder="{% if row.status.has_codex_key %}Clave Codex configurada{% else %}Pega la clave Codex aquí{% endif %}" />
         </div>
         <div class="form-field plan-field">
           <label for="plan-{{ row.user.id }}">Plan</label>
@@ -113,13 +122,25 @@
         <form method="post" action="/admin/client/{{ row.user.id }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="hidden" name="action" value="toggle_active" />
-          <button type="submit">{{ 'Pausar cuenta' if row.status.is_active else 'Activar cuenta' }}</button>
+          <button type="submit">{{ 'Pausar CC' if row.status.is_active else 'Activar CC' }}</button>
         </form>
         {% if row.status.has_api_key %}
         <form method="post" action="/admin/client/{{ row.user.id }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="hidden" name="action" value="remove_key" />
-          <button type="submit">Quitar clave</button>
+          <button type="submit">Quitar clave CC</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/admin/client/{{ row.user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="toggle_codex_active" />
+          <button type="submit">{{ 'Pausar Codex' if row.status.codex_is_active else 'Activar Codex' }}</button>
+        </form>
+        {% if row.status.has_codex_key %}
+        <form method="post" action="/admin/client/{{ row.user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="action" value="remove_codex_key" />
+          <button type="submit">Quitar clave Codex</button>
         </form>
         {% endif %}
         <form method="post" action="/admin/client/{{ row.user.id }}">

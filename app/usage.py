@@ -50,12 +50,16 @@ def account_status(db: Session, user: User) -> dict:
     db.commit()
     has_key = bool(user.api_key and decrypt_api_key(user.api_key))
     active = bool(user.is_active and has_key)
+    has_codex_key = bool(user.codex_api_key and decrypt_api_key(user.codex_api_key))
+    codex_active = bool(user.codex_is_active and has_codex_key)
     return {
         "email": user.email,
         "is_admin": user.is_admin,
         "mode": "api" if active else "trial",
         "is_active": active,
         "has_api_key": has_key,
+        "has_codex_key": has_codex_key,
+        "codex_is_active": codex_active,
         "messages_left": max(settings.daily_message_limit - row.messages_used, 0),
         "daily_message_limit": settings.daily_message_limit,
         "messages_today": row.messages_used,

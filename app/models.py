@@ -77,6 +77,8 @@ class User(Base):
     client_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     client_token_prefix: Mapped[str | None] = mapped_column(String(20), nullable=True)
     client_token_created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    codex_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    codex_is_active: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Conversation(Base):
@@ -213,6 +215,8 @@ def _add_missing_columns() -> None:
             "client_token_hash": "VARCHAR(64)",
             "client_token_prefix": "VARCHAR(20)",
             "client_token_created_at": "TIMESTAMP",
+            "codex_api_key": "TEXT",
+            "codex_is_active": "BOOLEAN DEFAULT FALSE NOT NULL",
         }
         with engine.begin() as connection:
             for name, sql_type in user_additions.items():

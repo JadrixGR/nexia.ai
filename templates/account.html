@@ -49,10 +49,16 @@
           {% endif %}
         </article>
         <article class="settings-card real-balance-card" id="provider-balance" data-enabled="{{ 'true' if status.is_active and status.has_api_key else 'false' }}">
-          <span class="real-balance-icon">▤</span>
-          <p>SALDO DISPONIBLE</p>
+          <span class="real-balance-icon">CC</span>
+          <p>SALDO CLAUDE CODE</p>
           <strong id="provider-balance-value">—</strong>
           <small id="provider-balance-detail">Consultando el saldo real de tu API…</small>
+        </article>
+        <article class="settings-card real-balance-card" id="codex-balance" data-enabled="{{ 'true' if status.codex_is_active and status.has_codex_key else 'false' }}">
+          <span class="real-balance-icon">CX</span>
+          <p>TOKENS CODEX</p>
+          <strong id="codex-balance-value">—</strong>
+          <small id="codex-balance-detail">Consultando tokens disponibles…</small>
         </article>
       </div>
       <div class="model-access settings-card">
@@ -102,6 +108,14 @@
         </div>
       </div>
       {% if new_client_token %}<div class="new-token-box"><p>GUÁRDALO AHORA — NO VOLVERÁ A MOSTRARSE — NO LO INCLUYAS EN CAPTURAS</p><div><code id="new-token">{{ new_client_token }}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('new-token').textContent);this.textContent='Copiado'">Copiar</button></div></div>{% endif %}
+
+      <div class="integration-intro settings-card codex-key-access" id="codex-key-access" data-enabled="{{ 'true' if status.codex_is_active and status.has_codex_key else 'false' }}" data-csrf="{{ csrf_token }}">
+        <div><span class="integration-icon">CX</span></div>
+        <div><h3>Tu API de Codex</h3><p>Es la clave asignada a tu cuenta para usar Codex (ChatGPT Codex CLI). Su saldo de tokens aparece en la tarjeta superior.</p>
+          {% if status.codex_is_active and status.has_codex_key %}<code id="codex-key-value">••••••••••••••••••••••••••••</code><small id="codex-key-help">Oculta hasta que solicites verla. No aparecerá en el HTML ni se guardará en el navegador.</small>{% else %}<span class="no-token">Tu cuenta todavía no tiene una API Codex activa.</span>{% endif %}
+        </div>
+        {% if status.codex_is_active and status.has_codex_key %}<div class="token-actions"><button class="btn btn-primary" id="reveal-codex-key" type="button">Mostrar clave</button><button class="btn btn-quiet" id="copy-codex-key" type="button">Copiar clave</button></div>{% endif %}
+      </div>
 
       <div class="integration-grid">
         <article class="settings-card integration-card">
@@ -298,6 +312,87 @@ codex</code></pre></div>
       }
     };
     loadProviderBalance();
+
+    const codexCard = document.getElementById("codex-balance");
+    if (codexCard) {
+      const codexValue = document.getElementById("codex-balance-value");
+      const codexDetail = document.getElementById("codex-balance-detail");
+      const loadCodexBalance = async () => {
+        if (codexCard.dataset.enabled !== "true") {
+          codexValue.textContent = "Sin API activa";
+          codexDetail.textContent = "Activa una API Codex para consultar sus tokens.";
+          return;
+        }
+        codexDetail.textContent = "Consultando tokens disponibles…";
+        try {
+          const response = await fetch("/api/codex-usage", { headers: { "Accept": "application/json" }, cache: "no-store" });
+          const data = await response.json();
+          if (!response.ok || !data.available) throw new Error(data.reason || "unavailable");
+          if (data.tokens_remaining !== null && data.tokens_remaining !== undefined) {
+            codexValue.textContent = new Intl.NumberFormat("es-PE").format(data.tokens_remaining);
+            const parts = [];
+            if (data.tokens_used !== null && data.tokens_used !== undefined) parts.push(`${new Intl.NumberFormat("es-PE").format(data.tokens_used)} usados`);
+            if (data.tokens_limit !== null && data.tokens_limit !== undefined) parts.push(`límite ${new Intl.NumberFormat("es-PE").format(data.tokens_limit)}`);
+            codexDetail.textContent = parts.length ? parts.join(" · ") : "Tokens disponibles en tu cuenta Codex";
+          } else {
+            codexValue.textContent = "—";
+            codexDetail.textContent = "La API Codex no informó tokens disponibles.";
+          }
+        } catch (_error) {
+          codexValue.textContent = "—";
+          codexDetail.textContent = "No se pudo consultar los tokens Codex en este momento.";
+        }
+      };
+      loadCodexBalance();
+    }
+
+    const codexAccess = document.getElementById("codex-key-access");
+    const codexKeyValue = document.getElementById("codex-key-value");
+    const codexKeyHelp = document.getElementById("codex-key-help");
+    const revealCodexKey = document.getElementById("reveal-codex-key");
+    const copyCodexKey = document.getElementById("copy-codex-key");
+    let codexKeyRaw = "";
+    let codexKeyVisible = false;
+
+    const loadCodexKey = async () => {
+      if (codexKeyRaw) return codexKeyRaw;
+      if (!codexAccess || codexAccess.dataset.enabled !== "true") {
+        throw new Error("Tu cuenta no tiene una API Codex activa.");
+      }
+      const response = await fetch("/api/codex-key/reveal", {
+        method: "POST",
+        headers: { "Accept": "application/json", "X-CSRF-Token": codexAccess.dataset.csrf },
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (!response.ok || !data.codex_key) throw new Error(data.detail || "No se pudo obtener tu API Codex.");
+      codexKeyRaw = data.codex_key;
+      return codexKeyRaw;
+    };
+
+    if (revealCodexKey) {
+      revealCodexKey.addEventListener("click", async () => {
+        try {
+          const key = await loadCodexKey();
+          codexKeyVisible = !codexKeyVisible;
+          codexKeyValue.textContent = codexKeyVisible ? key : "••••••••••••••••••••••••••••";
+          revealCodexKey.textContent = codexKeyVisible ? "Ocultar clave" : "Mostrar clave";
+          codexKeyHelp.textContent = codexKeyVisible
+            ? "Visible solo en esta sesión. No la compartas en capturas ni repositorios."
+            : "Clave oculta. Puedes volver a mostrarla cuando la necesites.";
+        } catch (error) { if (codexKeyHelp) codexKeyHelp.textContent = error.message; }
+      });
+    }
+    if (copyCodexKey) {
+      copyCodexKey.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(await loadCodexKey());
+          copyCodexKey.textContent = "Clave copiada";
+          if (codexKeyHelp) codexKeyHelp.textContent = "Clave copiada. Pégala en la configuración de Codex.";
+          setTimeout(() => { copyCodexKey.textContent = "Copiar clave"; }, 1400);
+        } catch (error) { if (codexKeyHelp) codexKeyHelp.textContent = error.message; }
+      });
+    }
   })();
 </script>
 {% endblock %}
